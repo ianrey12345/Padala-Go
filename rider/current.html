@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Current · Padala Go Rider</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .filter-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:10px; -webkit-overflow-scrolling:touch; }
+  .filter-row::-webkit-scrollbar{ display:none; }
+  .filter-chip{
+    flex:0 0 auto; padding:8px 14px; border-radius:20px; font-size:12.5px; font-weight:600;
+    background:var(--paper); color:var(--teal-dark); border:1.5px solid var(--line);
+    cursor:pointer; white-space:nowrap; user-select:none;
+  }
+  .filter-chip.active{ background:var(--teal); color:#fff; border-color:var(--teal); }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -21,6 +31,11 @@
     </div>
 
     <h3 style="font-size:15px; margin-bottom:8px;">Past Orders</h3>
+    <div class="filter-row" id="pastFilters">
+      <div class="filter-chip active" data-category="all">All</div>
+      <div class="filter-chip" data-category="bike_delivery">🏍️ Bike Delivery</div>
+      <div class="filter-chip" data-category="padala_pabili">🧾 Padala/Pabili</div>
+    </div>
     <div id="pastList">
       <div class="empty-state">Loading history…</div>
     </div>
@@ -86,38 +101,59 @@ function listenToActiveDelivery(){
     });
 }
 
+let allPastOrders = [];
+let activePastCategory = 'all';
+
 function listenToPastOrders(){
   db.collection('orders')
     .where('riderId','==', currentUser.uid)
     .where('status','in', ['completed','cancelled'])
     .orderBy('createdAt','desc')
     .onSnapshot(snap=>{
-      const list = document.getElementById('pastList');
-      if(snap.empty){
-        list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No completed deliveries yet.</div>`;
-        return;
-      }
-      list.innerHTML = '';
-      snap.forEach(doc=>{
-        const o = doc.data();
-        const card = document.createElement('div');
-        card.className = 'order-card';
-        card.innerHTML = `
-          <div class="top-row">
-            <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-            <span class="fare-tag">${fmtPeso(o.fare)}</span>
-          </div>
-          <div class="route">📍 ${o.pickup.address}</div>
-          <div class="route">🎯 ${o.dropoff.address}</div>
-          <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
-        `;
-        list.appendChild(card);
-      });
+      allPastOrders = snap.docs;
+      renderPastOrders();
     }, err=>{
       document.getElementById('pastList').innerHTML =
         `<div class="empty-state">Couldn't load history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
     });
 }
+
+function renderPastOrders(){
+  const list = document.getElementById('pastList');
+  const filtered = activePastCategory === 'all'
+    ? allPastOrders
+    : allPastOrders.filter(doc=> doc.data().serviceType === activePastCategory);
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No completed deliveries in this category yet.</div>`;
+    return;
+  }
+  list.innerHTML = '';
+  filtered.forEach(doc=>{
+    const o = doc.data();
+    const card = document.createElement('div');
+    card.className = 'order-card';
+    card.innerHTML = `
+      <div class="top-row">
+        <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+        <span class="fare-tag">${fmtPeso(o.fare)}</span>
+      </div>
+      <div class="route">📍 ${o.pickup.address}</div>
+      <div class="route">🎯 ${o.dropoff.address}</div>
+      <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+    `;
+    list.appendChild(card);
+  });
+}
+
+document.getElementById('pastFilters').querySelectorAll('.filter-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    activePastCategory = chip.dataset.category;
+    document.getElementById('pastFilters').querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    renderPastOrders();
+  });
+});
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
   e.preventDefault();

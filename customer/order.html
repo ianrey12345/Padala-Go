@@ -202,8 +202,8 @@ function placePoint(kind, point){
     dropoffMarker.addListener('dragend', ()=> onMarkerMoved('dropoff', dropoffMarker));
   }
 
-  reverseGeocode(point, address=>{
-    const full = { ...point, address };
+  reverseGeocode(point, (address, municipality)=>{
+    const full = { ...point, address, municipality };
     if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
     updatePointRow(kind, address);
     recalcFare();
@@ -213,8 +213,8 @@ function placePoint(kind, point){
 function onMarkerMoved(kind, marker){
   const pos = marker.getPosition();
   const point = { lat: pos.lat(), lng: pos.lng() };
-  reverseGeocode(point, address=>{
-    const full = { ...point, address };
+  reverseGeocode(point, (address, municipality)=>{
+    const full = { ...point, address, municipality };
     if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
     updatePointRow(kind, address);
     recalcFare();
@@ -230,12 +230,16 @@ async function reverseGeocode(point, cb){
     );
     const data = await res.json();
     if(data && data.display_name){
-      cb(data.display_name);
+      const a = data.address || {};
+      // Philippine addresses vary in which field holds the municipality/city name —
+      // try the common ones in order of specificity.
+      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+      cb(data.display_name, municipality);
     } else {
-      cb(`${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`);
+      cb(`${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, '');
     }
   } catch(err){
-    cb(`${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`);
+    cb(`${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, '');
   }
 }
 
