@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Order Status · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  #trackMap{ height:220px; }
+  .live-dot{
+    width:8px; height:8px; border-radius:50%; background:var(--green);
+    display:inline-block; position:relative;
+  }
+  .live-dot::after{
+    content:""; position:absolute; inset:-4px; border-radius:50%;
+    border:2px solid var(--green); opacity:0.6;
+    animation:livePulse 1.6s ease-out infinite;
+  }
+  @keyframes livePulse{
+    0%{ transform:scale(0.4); opacity:0.7; }
+    100%{ transform:scale(1.8); opacity:0; }
+  }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -29,6 +46,23 @@
         <div class="route" id="confirmedRiderName"></div>
         <div class="route" id="confirmedRiderVehicle"></div>
       </div>
+
+      <div class="order-card" id="mapCard" style="display:none; margin-top:10px; padding:0; overflow:hidden;">
+        <div style="padding:14px 16px 0;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="live-dot"></span>
+            <span style="font-weight:700; font-size:13.5px; color:var(--teal-dark);" id="trackTitle">Live rider location</span>
+          </div>
+          <div style="font-size:12px; color:#8A8178; margin:2px 0 10px;" id="trackHint">Waiting for your rider's location…</div>
+        </div>
+        <div id="trackMap"></div>
+        <div class="map-legend" style="padding:10px 16px;">
+          <span><span class="pin-dot" style="background:#F0A93A;"></span>Rider</span>
+          <span><span class="pin-dot" style="background:#2F8F5B;"></span>Pickup</span>
+          <span>🏁 Drop-off</span>
+        </div>
+      </div>
+
       <div class="order-card" id="etaBanner" style="display:none; margin-top:10px; background:#EAF3FF; border-color:#C7DEFF;">
         <div style="display:flex; align-items:center; gap:10px;">
           <div style="font-size:22px;">⏱️</div>
@@ -51,6 +85,7 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -68,6 +103,89 @@ requireAuth(user=>{
 });
 
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+/* ---------------------------------------------------------
+   Live rider-location tracking map. The rider's app writes
+   `riderLocation` onto this order doc every few seconds
+   (see broadcastRiderLocation() in rider/active-delivery.html);
+   we just render whatever the latest snapshot gives us.
+   --------------------------------------------------------- */
+let trackMap = null;
+let trackRiderMarker = null;
+let trackPickupMarker = null;
+let trackDropoffMarker = null;
+let trackMapReady = false;
+
+const trackRiderIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#F0A93A;border:2px solid #082F2B;box-shadow:0 0 0 2px #fff;"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+const trackPickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#2F8F5B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [18,18], iconAnchor: [9,9]
+});
+const trackDropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:20px;line-height:1;">🏁</div>',
+  iconSize: [20,20], iconAnchor: [10,20]
+});
+
+function ensureTrackMap(o){
+  if(trackMapReady) return;
+  trackMapReady = true;
+  trackMap = L.map('trackMap', { zoomControl: true }).setView([o.pickup.lat, o.pickup.lng], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(trackMap);
+  trackPickupMarker = L.marker([o.pickup.lat, o.pickup.lng], { icon: trackPickupIcon, title: 'Pickup: ' + o.pickup.address }).addTo(trackMap);
+  trackDropoffMarker = L.marker([o.dropoff.lat, o.dropoff.lng], { icon: trackDropoffIcon, title: 'Drop-off: ' + o.dropoff.address }).addTo(trackMap);
+}
+
+function updateTrackingMap(o){
+  const mapCard = document.getElementById('mapCard');
+  const trackTitle = document.getElementById('trackTitle');
+  const trackHint = document.getElementById('trackHint');
+
+  // Only show live tracking while there's an assigned rider actively en route.
+  if(!o.riderId || o.status === 'completed' || o.status === 'cancelled'){
+    mapCard.style.display = 'none';
+    return;
+  }
+
+  mapCard.style.display = 'block';
+  ensureTrackMap(o);
+
+  const boundsPoints = [
+    [o.pickup.lat, o.pickup.lng],
+    [o.dropoff.lat, o.dropoff.lng]
+  ];
+
+  if(o.riderLocation){
+    const pos = [o.riderLocation.lat, o.riderLocation.lng];
+    if(!trackRiderMarker){
+      trackRiderMarker = L.marker(pos, { icon: trackRiderIcon, title: 'Your rider', zIndexOffset: 1000 }).addTo(trackMap);
+    } else {
+      trackRiderMarker.setLatLng(pos);
+    }
+    boundsPoints.push(pos);
+
+    trackHint.textContent = o.status === 'in_progress'
+      ? "Your rider is on the way to the drop-off point."
+      : (o.arrivedAtPickup ? "Your rider is waiting at the pickup point." : "Your rider is on the way to the pickup point.");
+  } else {
+    trackHint.textContent = "Waiting for your rider's location…";
+  }
+
+  trackTitle.textContent = o.status === 'in_progress' ? 'Live rider location · heading to drop-off' : 'Live rider location · heading to pickup';
+
+  // fitBounds needs a real size for the container — invalidateSize covers the
+  // first render right after the card goes from display:none to visible.
+  trackMap.invalidateSize();
+  trackMap.fitBounds(boundsPoints, { padding: [40, 40] });
+}
 
 let etaDeadlineMs = null;
 let etaCountdownTimer = null;
@@ -115,10 +233,12 @@ function listenToOrder(){
     if(o.status === 'pending'){
       document.getElementById('requestsSection').style.display = 'block';
       document.getElementById('confirmedSection').style.display = 'none';
+      document.getElementById('mapCard').style.display = 'none';
       listenToRequests();
     } else if(o.status === 'confirmed' || o.status === 'in_progress' || o.status === 'completed'){
       document.getElementById('requestsSection').style.display = 'none';
       document.getElementById('confirmedSection').style.display = 'block';
+      updateTrackingMap(o);
       if(o.riderId){
         db.collection('users').doc(o.riderId).get().then(rd=>{
           if(rd.exists){
