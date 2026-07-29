@@ -36,6 +36,7 @@
       <span><span class="pin-dot" style="background:#2F8F5B;"></span>Pickup</span>
       <span>🏁 Drop-off</span>
     </div>
+    <div class="hint" id="locationWarning" style="display:none; color:var(--red);"></div>
     <div class="eta-pill" id="etaPill" style="display:none;"></div>
     <div class="hint">Straight-line distance shown — actual road distance may differ.</div>
 
@@ -147,12 +148,35 @@ function initMap(){
 
   if(navigator.geolocation){
     watchId = navigator.geolocation.watchPosition(pos=>{
+      hideLocationWarning();
       const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       updateRiderMarker(riderPos);
       if(orderData) updateRouteVisuals();
       broadcastRiderLocation(riderPos);
-    }, ()=>{}, { enableHighAccuracy: true });
+    }, err=>{
+      showLocationWarning(err);
+    }, { enableHighAccuracy: true });
+  } else {
+    showLocationWarning(null);
   }
+}
+
+function showLocationWarning(err){
+  const el = document.getElementById('locationWarning');
+  if(!el) return;
+  if(err && err.code === err.PERMISSION_DENIED){
+    el.textContent = "Location access is off — turn it on in your browser or phone settings so the customer can see your live location.";
+  } else if(!navigator.geolocation){
+    el.textContent = "This browser doesn't support location — the customer won't see your live position.";
+  } else {
+    el.textContent = "Couldn't get your location right now — check that location services are on.";
+  }
+  el.style.display = 'block';
+}
+
+function hideLocationWarning(){
+  const el = document.getElementById('locationWarning');
+  if(el) el.style.display = 'none';
 }
 
 let lastLocationWriteAt = 0;
@@ -166,7 +190,7 @@ function broadcastRiderLocation(pos){
   db.collection('orders').doc(orderId).update({
     riderLocation: pos,
     riderLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  }).catch(()=>{ /* order may not exist yet on first tick — ignore */ });
+  }).catch(err=>{ console.warn('Could not broadcast rider location:', err); });
 }
 
 function updateRiderMarker(pos){

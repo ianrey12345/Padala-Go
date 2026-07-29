@@ -327,7 +327,13 @@ function showDecisionModal(orderId, order){
 
   overlay.querySelector('#padalaAcceptBtn').addEventListener('click', ()=>{
     cleanup();
-    db.collection('orders').doc(orderId).update({ riderAccepted: true });
+    db.collection('orders').doc(orderId).update({ riderAccepted: true }).then(()=>{
+      // Send the rider straight into the tracking page so their live
+      // location starts broadcasting immediately — waiting for them to
+      // navigate there manually is exactly why the customer's map was
+      // stuck on "Waiting for your rider's location…".
+      window.location.href = 'active-delivery.html?id=' + orderId;
+    });
   });
 
   overlay.querySelector('#padalaDeclineBtn').addEventListener('click', ()=>{
