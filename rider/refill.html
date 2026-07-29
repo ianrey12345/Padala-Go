@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Refill Account · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar plain">
+    <a href="wallet.html" class="back">← Wallet</a>
+    <h1 style="color:#fff; font-size:19px;">Refill Account</h1>
+  </div>
+
+  <div class="content">
+    <div class="wallet-balance-card">
+      <div class="lbl">Current Balance</div>
+      <div class="amount" id="bigBalance">₱0.00</div>
+    </div>
+
+    <div id="successBanner" class="success-banner"></div>
+    <div id="errorBanner" class="error-banner"></div>
+
+    <div class="field">
+      <label>Choose an amount</label>
+      <div class="chip-row" id="chipRow">
+        <div class="amount-chip" data-amount="100">₱100</div>
+        <div class="amount-chip" data-amount="300">₱300</div>
+        <div class="amount-chip" data-amount="500">₱500</div>
+        <div class="amount-chip" data-amount="1000">₱1,000</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="customAmount">Or enter a custom amount</label>
+      <input type="number" id="customAmount" placeholder="e.g. 250" min="1" step="1">
+    </div>
+
+    <button type="button" class="btn btn-primary" id="refillBtn" style="margin-top:6px;" disabled>
+      Confirm Top Up
+    </button>
+
+    <div class="hint" style="margin-top:10px;">This is a simulated top-up for now — no real payment method is connected yet.</div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html"><span class="g">📋</span>Current</a>
+    <a href="menu.html" class="active"><span class="g">☰</span>Menu</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let currentUser = null;
+let selectedAmount = null;
+
+requireAuth(async (user)=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  watchWalletBalance('bigBalance', user.uid);
+});
+
+const chipRow = document.getElementById('chipRow');
+const customAmount = document.getElementById('customAmount');
+const refillBtn = document.getElementById('refillBtn');
+
+chipRow.querySelectorAll('.amount-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    customAmount.value = '';
+    selectedAmount = parseInt(chip.dataset.amount, 10);
+    refillBtn.disabled = false;
+  });
+});
+
+customAmount.addEventListener('input', ()=>{
+  chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
+  const val = parseFloat(customAmount.value);
+  if(val > 0){
+    selectedAmount = val;
+    refillBtn.disabled = false;
+  } else {
+    selectedAmount = null;
+    refillBtn.disabled = true;
+  }
+});
+
+refillBtn.addEventListener('click', async ()=>{
+  if(!selectedAmount || !currentUser) return;
+  const errorBanner = document.getElementById('errorBanner');
+  const successBanner = document.getElementById('successBanner');
+  errorBanner.style.display = 'none';
+  successBanner.style.display = 'none';
+  refillBtn.disabled = true;
+  refillBtn.innerHTML = '<span class="spinner"></span> Processing…';
+
+  try{
+    await refillWallet(currentUser.uid, selectedAmount);
+    successBanner.textContent = `Wallet refilled with ${fmtPeso(selectedAmount)}.`;
+    successBanner.style.display = 'block';
+    customAmount.value = '';
+    chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
+    selectedAmount = null;
+  } catch(err){
+    errorBanner.textContent = "Couldn't complete the top-up. Please try again.";
+    errorBanner.style.display = 'block';
+  }
+  refillBtn.disabled = true;
+  refillBtn.textContent = "Confirm Top Up";
+});
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>

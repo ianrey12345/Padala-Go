@@ -62,6 +62,82 @@ function fmtPeso(n){
   return "\u20B1" + n.toLocaleString('en-PH');
 }
 
+/* ---------------------------------------------------------
+   Rider wallet — a separate platform balance from the cash
+   fare the rider collects in person. The rider tops this up
+   (Refill Account), and the platform automatically deducts a
+   10% commission from it every time a delivery is completed.
+   Every change is logged to users/{riderId}/walletTransactions
+   so the Statistics page can show a full breakdown.
+   --------------------------------------------------------- */
+const COMMISSION_RATE = 0.10;       // 10% of the fare, deducted from wallet on completion
+const LOW_BALANCE_THRESHOLD = 50;   // header shows a low-balance warning below this
+
+/* Marks an order completed AND deducts the 10% commission from the
+   rider's wallet balance, atomically, so the two can never drift apart.
+   Also writes a walletTransactions record for the Statistics page. */
+async function completeOrderWithCommission(orderId, riderId, fare){
+  const commission = Math.round(fare * COMMISSION_RATE);
+  const orderRef = db.collection('orders').doc(orderId);
+  const riderRef = db.collection('users').doc(riderId);
+  const txnRef = riderRef.collection('walletTransactions').doc();
+
+  await db.runTransaction(async (t)=>{
+    const riderSnap = await t.get(riderRef);
+    const currentBalance = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
+    const newBalance = currentBalance - commission;
+
+    t.update(orderRef, {
+      status: 'completed',
+      completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      commissionDeducted: commission
+    });
+    t.update(riderRef, { walletBalance: newBalance });
+    t.set(txnRef, {
+      type: 'commission',
+      amount: -commission,
+      fare: fare,
+      orderId: orderId,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  });
+
+  return commission;
+}
+
+/* Self-service top-up (simulated — no real payment gateway wired up yet).
+   Adds `amount` pesos to the rider's wallet and logs the transaction. */
+async function refillWallet(riderId, amount){
+  const riderRef = db.collection('users').doc(riderId);
+  const txnRef = riderRef.collection('walletTransactions').doc();
+
+  let newBalance;
+  await db.runTransaction(async (t)=>{
+    const riderSnap = await t.get(riderRef);
+    const currentBalance = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
+    newBalance = currentBalance + amount;
+    t.update(riderRef, { walletBalance: newBalance });
+    t.set(txnRef, {
+      type: 'refill',
+      amount: amount,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  });
+
+  return newBalance;
+}
+
+/* Live-updates a header element with the rider's current wallet balance.
+   Call once per page; returns the Firestore unsubscribe function. */
+function watchWalletBalance(elId, riderId, onUpdate){
+  return db.collection('users').doc(riderId).onSnapshot(doc=>{
+    const bal = (doc.exists && doc.data().walletBalance) || 0;
+    const el = document.getElementById(elId);
+    if(el) el.textContent = fmtPeso(bal);
+    if(onUpdate) onUpdate(bal);
+  });
+}
+
 function timeAgo(ts){
   if(!ts) return "";
   const secs = Math.floor((Date.now() - ts.toDate().getTime())/1000);

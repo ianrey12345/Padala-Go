@@ -81,6 +81,7 @@ form.addEventListener('submit', async (e)=>{
     await db.collection('users').doc(cred.user.uid).set({
       name, phone, plate, motorColor, email,
       role: 'rider',
+      walletBalance: 0,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     window.location.href = "orders.html";

@@ -14,14 +14,30 @@
     cursor:pointer; white-space:nowrap; user-select:none;
   }
   .filter-chip.active{ background:var(--teal); color:#fff; border-color:var(--teal); }
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .wallet-pill{
+    flex-shrink:0; display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.15);
+    color:#fff; font-family:'Space Mono'; font-weight:700; font-size:14px;
+    padding:8px 12px; border-radius:14px; text-decoration:none; margin-top:2px;
+  }
+  .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
+  .wallet-pill .warn{ font-size:13px; }
 </style>
 </head>
 <body>
 <div class="app-shell">
   <div class="topbar">
-    <div class="eyebrow">Padala Go Rider</div>
-    <h1>Current</h1>
-    <div class="sub">Your active delivery and order history</div>
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Rider</div>
+        <h1>Current</h1>
+        <div class="sub">Your active delivery and order history</div>
+      </div>
+      <a href="wallet.html" class="wallet-pill" id="walletPill">
+        <span id="walletWarn" class="warn" style="display:none;">⚠️</span>
+        <span id="walletBalanceHeader">₱0</span>
+      </a>
+    </div>
   </div>
 
   <div class="content">
@@ -44,6 +60,7 @@
   <div class="tabbar">
     <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
     <a href="current.html" class="active"><span class="g">📋</span>Current</a>
+    <a href="menu.html"><span class="g">☰</span>Menu</a>
     <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
   </div>
 </div>
@@ -68,6 +85,13 @@ requireAuth(async user=>{
   listenToActiveDelivery();
   listenToPastOrders();
   watchForRiderConfirmations(user.uid);
+  watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
+    const pill = document.getElementById('walletPill');
+    const warn = document.getElementById('walletWarn');
+    const isLow = bal < LOW_BALANCE_THRESHOLD;
+    pill.classList.toggle('low', isLow);
+    warn.style.display = isLow ? 'inline' : 'none';
+  });
 });
 
 function listenToActiveDelivery(){

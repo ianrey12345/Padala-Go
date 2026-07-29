@@ -264,7 +264,18 @@ function renderStage(orderRef){
     stageSub.textContent = "Head toward the teal pin — that's the drop-off location.";
     actionBtn.textContent = "Mark Delivered";
     actionBtn.className = "btn btn-amber";
-    actionBtn.onclick = ()=> orderRef.update({ status: 'completed' });
+    actionBtn.onclick = async ()=>{
+      actionBtn.disabled = true;
+      actionBtn.textContent = "Completing…";
+      try{
+        const commission = await completeOrderWithCommission(orderId, currentUser.uid, o.fare);
+        showToast(`Delivered! ${fmtPeso(commission)} commission (10%) deducted from your wallet.`);
+      } catch(err){
+        alert("Couldn't complete the delivery. Please check your connection and try again.");
+        actionBtn.disabled = false;
+        actionBtn.textContent = "Mark Delivered";
+      }
+    };
   } else if(o.status === 'completed'){
     stageText.textContent = "Delivery completed 🎉";
     stageSub.textContent = "Nice work!";
