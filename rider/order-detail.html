@@ -124,6 +124,38 @@ const ASSUMED_SPEED_KMH = 25;
 
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
 
+/* Same live ticking countdown pattern as active-delivery.html and the
+   customer's order-status page — recalibrated on every fresh GPS fix. */
+let etaDeadlineMs = null;
+let etaCountdownTimer = null;
+
+function startEtaCountdown(){
+  if(etaCountdownTimer) return;
+  tickEtaCountdown();
+  etaCountdownTimer = setInterval(tickEtaCountdown, 1000);
+}
+
+function stopEtaCountdown(){
+  if(etaCountdownTimer){
+    clearInterval(etaCountdownTimer);
+    etaCountdownTimer = null;
+  }
+  etaDeadlineMs = null;
+}
+
+function tickEtaCountdown(){
+  const el = document.getElementById('statEta');
+  if(!el || etaDeadlineMs === null) return;
+  const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
+  if(secsLeft <= 0){
+    el.textContent = "Any moment";
+  } else {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    el.textContent = m > 0 ? `${m}m ${s.toString().padStart(2,'0')}s` : `${s}s`;
+  }
+}
+
 requireAuth(user=>{
   currentUser = user;
   if(!orderId){ window.location.href = "orders.html"; return; }
@@ -217,7 +249,9 @@ function updateVisuals(){
     const kmToPickup = distanceKmBetween({ lat: riderPos.lat, lng: riderPos.lng }, { lat: o.pickup.lat, lng: o.pickup.lng });
     const mins = Math.max(1, Math.round((kmToPickup / ASSUMED_SPEED_KMH) * 60));
     document.getElementById('statToAddress').textContent = kmToPickup.toFixed(1) + ' km';
-    document.getElementById('statEta').textContent = mins + ' min';
+    // Recalibrate the countdown deadline against this fresh location fix.
+    etaDeadlineMs = Date.now() + mins * 60000;
+    startEtaCountdown();
   }
 
   map.fitBounds(boundsPoints, { padding: [70, 70] });
@@ -290,6 +324,7 @@ function setRequestButton(requested){
 
 window.addEventListener('beforeunload', ()=>{
   if(watchId) navigator.geolocation.clearWatch(watchId);
+  stopEtaCountdown();
 });
 </script>
 </body>
