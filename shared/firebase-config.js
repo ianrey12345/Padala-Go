@@ -26,7 +26,7 @@ const db = firebase.firestore();
    the first kilometer is covered by BASE_FARE, every
    kilometer after that costs PER_KM_RATE.
    --------------------------------------------------------- */
-const BASE_FARE = 40;      // covers the first kilometer — adjust as needed
+const BASE_FARE = 15.2;      // covers the first kilometer — adjust as needed
 const PER_KM_RATE = 12;    // pesos per km after the first
 
 function computeFare(distanceKm){
@@ -328,11 +328,13 @@ function showDecisionModal(orderId, order){
   overlay.querySelector('#padalaAcceptBtn').addEventListener('click', ()=>{
     cleanup();
     db.collection('orders').doc(orderId).update({ riderAccepted: true }).then(()=>{
-      // Send the rider straight into the tracking page so their live
-      // location starts broadcasting immediately — waiting for them to
-      // navigate there manually is exactly why the customer's map was
-      // stuck on "Waiting for your rider's location…".
-      window.location.href = 'active-delivery.html?id=' + orderId;
+      // Send the rider straight into the Map tab so their live location
+      // starts broadcasting immediately — waiting for them to navigate
+      // there manually is exactly why the customer's map was stuck on
+      // "Waiting for your rider's location…". The Map tab finds this
+      // order itself (it queries for the rider's own active delivery),
+      // so no id param is needed.
+      window.location.href = 'map.html';
     });
   });
 

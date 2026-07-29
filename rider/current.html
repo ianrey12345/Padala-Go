@@ -47,7 +47,7 @@
       <div id="activeCard"></div>
 
       <div style="text-align:center; margin:14px 0;">
-        <button type="button" class="btn btn-outline" id="viewMapBtn" style="width:auto; display:none; padding:11px 26px;">🗺️ View Map</button>
+        <a href="map.html" id="viewMapBtn" class="btn btn-outline" style="width:auto; display:none; padding:11px 26px; text-decoration:none;">🗺️ View Map</a>
       </div>
 
       <div class="order-card" id="etaBanner" style="display:none; margin-top:10px; background:#EAF3FF; border-color:#C7DEFF;">
@@ -70,8 +70,6 @@
       </div>
     </div>
 
-    <div id="mapModalRoot"></div>
-
     <h3 style="font-size:15px; margin-bottom:8px;">Past Orders</h3>
     <div class="filter-row" id="pastFilters">
       <div class="filter-chip active" data-category="all">All</div>
@@ -86,6 +84,7 @@
   <div class="tabbar">
     <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
     <a href="current.html" class="active"><span class="g">📋</span>Current</a>
+    <a href="map.html"><span class="g">🗺️</span>Map</a>
     <a href="menu.html"><span class="g">☰</span>Menu</a>
     <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
   </div>
@@ -105,17 +104,14 @@ function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bi
    Live ticking ETA countdown for the rider's own Current tab —
    same pattern as the customer's order-status.html. Reads the
    `riderLocation` field already written onto the order doc by
-   active-delivery.html, so no separate geolocation watch is
-   needed here; this just renders the latest known fix.
+   the Map tab (map.html), so no separate geolocation watch is
+   needed here; this just renders the latest known fix. The live
+   road-following route and progress overlay itself live on the
+   dedicated Map tab — the "View Map" button below links there.
    --------------------------------------------------------- */
 let etaDeadlineMs = null;
-let etaTotalMs = null;        // baseline duration of the current phase — used for the % fill on the transit line
-let etaPhase = '';            // 'pickup' or 'dropoff' — which leg the countdown is currently for
 let etaCountdownTimer = null;
-let currentActiveOrder = null; // latest active-order data, so the map button/modal can use it
-let mapModalOpen = false;
-let fullMapRef = null;
-let progressLineRef = null;
+let currentActiveOrder = null;
 
 function startEtaCountdown(){
   if(etaCountdownTimer) return; // already ticking — recalibration just moved the deadline
@@ -145,119 +141,8 @@ function tickEtaCountdown(){
       etaText.textContent = m > 0 ? `Arriving in ${m}m ${s.toString().padStart(2,'0')}s` : `Arriving in ${s}s`;
     }
   }
-
-  if(mapModalOpen) renderTransitProgress(secsLeft);
 }
 
-function formatMmSs(secs){
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m > 0 ? `${m}m ${s.toString().padStart(2,'0')}s` : `${s}s`;
-}
-
-/* Draws the "transit line" progress inside the full-screen map modal:
-   a track line between pickup and drop-off plus a colored overlay line
-   that grows to show how far along the trip the rider is. Since the
-   full-screen map intentionally shows only pickup + drop-off (no live
-   pin), progress is driven by elapsed time against the current phase's
-   estimated duration rather than actual position — same straight-line
-   approximation used everywhere else in this app. */
-function renderTransitProgress(secsLeft){
-  const fillEl = document.getElementById('transitProgressFill');
-  const textEl = document.getElementById('fullMapEtaText');
-  if(!fillEl || !textEl) return;
-
-  let pct = 0;
-  let label = 'Waiting for location…';
-
-  if(etaPhase === 'dropoff' && etaTotalMs){
-    const totalSecs = etaTotalMs / 1000;
-    pct = Math.min(100, Math.max(0, Math.round((1 - secsLeft / totalSecs) * 100)));
-    label = secsLeft <= 0 ? "Arriving at drop-off any moment…" : `Heading to drop-off — ${formatMmSs(secsLeft)} left`;
-  } else if(etaPhase === 'pickup'){
-    pct = 0; // hasn't started the pickup → drop-off leg shown on this map yet
-    label = secsLeft <= 0 ? "Arriving at pickup any moment…" : `Heading to pickup — ${formatMmSs(secsLeft)} left`;
-  }
-
-  fillEl.style.width = pct + '%';
-  textEl.textContent = label;
-
-  if(progressLineRef && currentActiveOrder && etaPhase === 'dropoff'){
-    const o = currentActiveOrder;
-    const lat = o.pickup.lat + (o.dropoff.lat - o.pickup.lat) * (pct / 100);
-    const lng = o.pickup.lng + (o.dropoff.lng - o.pickup.lng) * (pct / 100);
-    progressLineRef.setLatLngs([[o.pickup.lat, o.pickup.lng], [lat, lng]]);
-  }
-}
-
-function openMapModal(o){
-  mapModalOpen = true;
-  const root = document.getElementById('mapModalRoot');
-  root.innerHTML = `
-    <div style="position:fixed; inset:0; background:#fff; z-index:2000; display:flex; flex-direction:column;">
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--line); flex-shrink:0;">
-        <div style="font-weight:700; color:var(--teal-dark); font-size:15px;">Route</div>
-        <button type="button" id="closeMapBtn" style="border:none; background:none; font-size:22px; color:var(--teal-dark); cursor:pointer; line-height:1; padding:4px;">✕</button>
-      </div>
-      <div id="fullMap" style="flex:1;"></div>
-      <div style="padding:16px 18px calc(16px + env(safe-area-inset-bottom)); flex-shrink:0;">
-        <div style="height:6px; background:var(--line); border-radius:4px; overflow:hidden; margin-bottom:10px;">
-          <div id="transitProgressFill" style="height:100%; width:0%; background:var(--amber); transition:width 0.6s ease;"></div>
-        </div>
-        <div style="font-weight:700; color:var(--teal-dark); font-size:14px;" id="fullMapEtaText">Calculating…</div>
-      </div>
-    </div>
-  `;
-
-  document.getElementById('closeMapBtn').addEventListener('click', closeMapModal);
-
-  const pickupIcon = L.divIcon({
-    className: '',
-    html: '<div style="width:18px;height:18px;border-radius:50%;background:#2F8F5B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
-    iconSize: [18,18], iconAnchor: [9,9]
-  });
-  const dropoffIcon = L.divIcon({
-    className: '',
-    html: '<div style="font-size:20px;line-height:1;">🏁</div>',
-    iconSize: [20,20], iconAnchor: [10,20]
-  });
-
-  const fmap = L.map('fullMap', { zoomControl: true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(fmap);
-
-  L.marker([o.pickup.lat, o.pickup.lng], { icon: pickupIcon, title: 'Pickup: ' + o.pickup.address }).addTo(fmap);
-  L.marker([o.dropoff.lat, o.dropoff.lng], { icon: dropoffIcon, title: 'Drop-off: ' + o.dropoff.address }).addTo(fmap);
-
-  // Faint full-length track line, plus a colored overlay line that grows
-  // with progress — the "transit path" fill, drawn straight since this
-  // app uses straight-line distance throughout.
-  L.polyline([[o.pickup.lat, o.pickup.lng], [o.dropoff.lat, o.dropoff.lng]], {
-    color: '#C7BFB2', weight: 5, opacity: 0.6
-  }).addTo(fmap);
-  progressLineRef = L.polyline([[o.pickup.lat, o.pickup.lng], [o.pickup.lat, o.pickup.lng]], {
-    color: '#F0A93A', weight: 5
-  }).addTo(fmap);
-
-  fmap.fitBounds([[o.pickup.lat, o.pickup.lng], [o.dropoff.lat, o.dropoff.lng]], { padding: [50, 50] });
-  setTimeout(()=> fmap.invalidateSize(), 50);
-  fullMapRef = fmap;
-
-  const secsLeft = etaDeadlineMs !== null ? Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000)) : 0;
-  renderTransitProgress(secsLeft);
-}
-
-function closeMapModal(){
-  mapModalOpen = false;
-  if(fullMapRef){ fullMapRef.remove(); fullMapRef = null; }
-  progressLineRef = null;
-  document.getElementById('mapModalRoot').innerHTML = '';
-}
-
-/* Same destination logic as active-delivery.html: head to pickup
-   until picked up, then head to drop-off. */
 function updateEtaDisplay(o){
   currentActiveOrder = o;
   document.getElementById('viewMapBtn').style.display = 'inline-flex';
@@ -270,13 +155,11 @@ function updateEtaDisplay(o){
     stopEtaCountdown();
     arrivedBanner.style.display = 'block';
     document.getElementById('arrivedTime').textContent = o.arrivedAtPickupAt ? timeAgo(o.arrivedAtPickupAt) : '';
-    etaPhase = '';
     return;
   }
   arrivedBanner.style.display = 'none';
 
   const dest = o.status === 'in_progress' ? o.dropoff : o.pickup;
-  etaPhase = o.status === 'in_progress' ? 'dropoff' : 'pickup';
 
   if(o.riderLocation && dest){
     const km = distanceKmBetween(o.riderLocation, { lat: dest.lat, lng: dest.lng });
@@ -285,17 +168,12 @@ function updateEtaDisplay(o){
     document.getElementById('etaSub').textContent = `${km.toFixed(1)} km to ${o.status === 'in_progress' ? 'drop-off' : 'pickup'}`;
     // Recalibrate the countdown deadline against this fresh location fix.
     etaDeadlineMs = Date.now() + mins * 60000;
-    etaTotalMs = mins * 60000;
     startEtaCountdown();
   } else {
     etaBanner.style.display = 'none';
     stopEtaCountdown();
   }
 }
-
-document.getElementById('viewMapBtn').addEventListener('click', ()=>{
-  if(currentActiveOrder) openMapModal(currentActiveOrder);
-});
 
 requireAuth(async user=>{
   currentUser = user;
@@ -330,14 +208,13 @@ function listenToActiveDelivery(){
         document.getElementById('viewMapBtn').style.display = 'none';
         stopEtaCountdown();
         currentActiveOrder = null;
-        if(mapModalOpen) closeMapModal();
         return;
       }
       const doc = snap.docs[0];
       const o = doc.data();
       section.style.display = 'block';
       document.getElementById('activeCard').innerHTML = `
-        <a href="active-delivery.html?id=${doc.id}" style="text-decoration:none; color:inherit;">
+        <a href="map.html" style="text-decoration:none; color:inherit;">
           <div class="order-card">
             <div class="top-row">
               <span class="service-tag">${serviceLabel(o.serviceType)}</span>
@@ -418,7 +295,6 @@ document.getElementById('logoutLink').addEventListener('click', async (e)=>{
 
 window.addEventListener('beforeunload', ()=>{
   stopEtaCountdown();
-  if(mapModalOpen) closeMapModal();
 });
 </script>
 </body>
