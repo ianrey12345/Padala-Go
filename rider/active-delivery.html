@@ -84,6 +84,7 @@ function initMap(){
     center: { lat: 14.6760, lng: 121.0437 },
     zoom: 13,
     disableDefaultUI: true,
+    gestureHandling: 'greedy',
     zoomControl: true,
   });
 
@@ -240,7 +241,7 @@ function renderStage(orderRef){
   } else if(o.status === 'confirmed' && o.arrivedAtPickup){
     stageText.textContent = "Arrived at pickup point";
     stageSub.textContent = "Customer has been notified. Once you have the item, mark it picked up.";
-    actionBtn.textContent = "Let's Go to Destination";
+    actionBtn.textContent = "Mark Picked Up";
     actionBtn.className = "btn btn-primary";
     actionBtn.onclick = ()=> orderRef.update({ status: 'in_progress' });
   } else if(o.status === 'in_progress'){
