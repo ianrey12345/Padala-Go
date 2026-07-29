@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Refill Account · Padala Go Rider</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:18px; padding:26px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal-card .amount{ font-family:'Space Mono'; font-weight:700; font-size:32px; color:var(--teal-dark); margin:8px 0 4px; }
+  .modal-card .note{ font-size:13px; color:#8A8178; margin-bottom:20px; line-height:1.4; }
+  .modal-actions{ display:flex; gap:10px; }
+  .status-pill{
+    display:inline-block; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px;
+  }
+  .status-pill.pending{ background:#FDF1DC; color:#B67A16; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -41,7 +58,12 @@
       Confirm Top Up
     </button>
 
-    <div class="hint" style="margin-top:10px;">This is a simulated top-up for now — no real payment method is connected yet.</div>
+    <div class="hint" style="margin-top:10px;">Refills are reviewed by an admin before they're added to your balance. This is a simulated top-up for now — no real payment method is connected yet.</div>
+
+    <h3 style="font-size:15px; margin:22px 0 8px;">Your Pending Requests</h3>
+    <div id="pendingList">
+      <div class="empty-state">No pending requests.</div>
+    </div>
   </div>
 
   <div class="tabbar">
@@ -52,12 +74,15 @@
   </div>
 </div>
 
+<div id="modalRoot"></div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="../shared/firebase-config.js"></script>
 <script>
 let currentUser = null;
+let riderName = 'Rider';
 let selectedAmount = null;
 
 requireAuth(async (user)=>{
@@ -68,12 +93,16 @@ requireAuth(async (user)=>{
     window.location.href = "index.html";
     return;
   }
+  riderName = doc.data().name || 'Rider';
   watchWalletBalance('bigBalance', user.uid);
+  listenToPendingRequests(user.uid);
 });
 
 const chipRow = document.getElementById('chipRow');
 const customAmount = document.getElementById('customAmount');
 const refillBtn = document.getElementById('refillBtn');
+const errorBanner = document.getElementById('errorBanner');
+const successBanner = document.getElementById('successBanner');
 
 chipRow.querySelectorAll('.amount-chip').forEach(chip=>{
   chip.addEventListener('click', ()=>{
@@ -97,29 +126,92 @@ customAmount.addEventListener('input', ()=>{
   }
 });
 
-refillBtn.addEventListener('click', async ()=>{
-  if(!selectedAmount || !currentUser) return;
-  const errorBanner = document.getElementById('errorBanner');
-  const successBanner = document.getElementById('successBanner');
-  errorBanner.style.display = 'none';
-  successBanner.style.display = 'none';
-  refillBtn.disabled = true;
-  refillBtn.innerHTML = '<span class="spinner"></span> Processing…';
-
-  try{
-    await refillWallet(currentUser.uid, selectedAmount);
-    successBanner.textContent = `Wallet refilled with ${fmtPeso(selectedAmount)}.`;
-    successBanner.style.display = 'block';
-    customAmount.value = '';
-    chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
-    selectedAmount = null;
-  } catch(err){
-    errorBanner.textContent = "Couldn't complete the top-up. Please try again.";
-    errorBanner.style.display = 'block';
-  }
-  refillBtn.disabled = true;
-  refillBtn.textContent = "Confirm Top Up";
+refillBtn.addEventListener('click', ()=>{
+  if(!selectedAmount) return;
+  showConfirmModal(selectedAmount);
 });
+
+function showConfirmModal(amount){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div style="font-size:30px;">💰</div>
+      <div class="note" style="margin-bottom:2px;">Refill your wallet with</div>
+      <div class="amount">${fmtPeso(amount)}</div>
+      <div class="note">This will be sent to an admin for approval. Your balance won't update until it's approved.</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="modalCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="modalConfirmBtn">Confirm</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').appendChild(overlay);
+
+  overlay.querySelector('#modalCancelBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#modalConfirmBtn').addEventListener('click', async ()=>{
+    const confirmBtn = overlay.querySelector('#modalConfirmBtn');
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner"></span>';
+    try{
+      await submitRefillRequest(currentUser.uid, riderName, amount);
+      overlay.remove();
+      successBanner.textContent = `Refill request for ${fmtPeso(amount)} submitted — waiting for admin approval.`;
+      successBanner.style.display = 'block';
+      errorBanner.style.display = 'none';
+      customAmount.value = '';
+      chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
+      selectedAmount = null;
+      refillBtn.disabled = true;
+    } catch(err){
+      overlay.remove();
+      errorBanner.textContent = "Couldn't submit your refill request. Please try again.";
+      errorBanner.style.display = 'block';
+    }
+  });
+}
+
+function listenToPendingRequests(riderId){
+  db.collection('refillRequests')
+    .where('riderId','==', riderId)
+    .where('status','==','pending')
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('pendingList');
+      if(snap.empty){
+        list.innerHTML = `<div class="empty-state">No pending requests.</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      snap.forEach(doc=>{
+        const r = doc.data();
+        const row = document.createElement('div');
+        row.className = 'order-card';
+        row.innerHTML = `
+          <div class="top-row">
+            <span class="status-pill pending">Awaiting approval</span>
+            <span class="fare-tag">${fmtPeso(r.amount)}</span>
+          </div>
+          <div class="route">Requested ${r.createdAt ? timeAgo(r.createdAt) : 'just now'}</div>
+          <button class="btn btn-outline btn-sm" style="margin-top:8px;" data-id="${doc.id}">Cancel Request</button>
+        `;
+        row.querySelector('button').addEventListener('click', async (e)=>{
+          e.target.disabled = true;
+          e.target.textContent = 'Cancelling…';
+          try{
+            await cancelRefillRequest(doc.id);
+          } catch(err){
+            e.target.disabled = false;
+            e.target.textContent = 'Cancel Request';
+          }
+        });
+        list.appendChild(row);
+      });
+    }, err=>{
+      document.getElementById('pendingList').innerHTML =
+        `<div class="empty-state">Couldn't load pending requests. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
   e.preventDefault();

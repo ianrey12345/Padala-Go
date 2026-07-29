@@ -23,7 +23,7 @@
     <div class="menu-section">
       <a href="refill.html" class="menu-row">
         <span class="row-label">➕ Refill Account</span>
-        <span class="row-right"><span class="chevron">›</span></span>
+        <span class="row-right"><span class="row-count" id="pendingCount" style="display:none;"></span><span class="chevron">›</span></span>
       </a>
       <a href="statistics.html" class="menu-row">
         <span class="row-label">📊 Statistics</span>
@@ -57,6 +57,18 @@ requireAuth(async (user)=>{
   watchWalletBalance('bigBalance', user.uid, (bal)=>{
     document.getElementById('lowHint').style.display = bal < LOW_BALANCE_THRESHOLD ? 'inline-block' : 'none';
   });
+  db.collection('refillRequests')
+    .where('riderId','==', user.uid)
+    .where('status','==','pending')
+    .onSnapshot(snap=>{
+      const el = document.getElementById('pendingCount');
+      if(snap.empty){
+        el.style.display = 'none';
+      } else {
+        el.textContent = `${snap.size} pending`;
+        el.style.display = 'inline';
+      }
+    });
 });
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{

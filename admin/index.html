@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Sign In · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="content auth-wrap">
+    <div class="brand-mark">
+      <div class="dot" style="background:var(--teal-dark); color:#fff;">P</div>
+      <span>Padala Go <span style="color:var(--amber);">Admin</span></span>
+    </div>
+
+    <h1>Admin sign in</h1>
+    <p style="color:#6C7A78; font-size:14px; margin-top:0;">Review and approve rider wallet refill requests.</p>
+
+    <div id="errorBanner" class="error-banner"></div>
+
+    <form id="loginForm" style="margin-top:20px;">
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="admin@email.com" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn btn-primary" id="signInBtn">Sign In</button>
+    </form>
+
+    <p style="text-align:center; font-size:12px; color:#9B9186; margin-top:26px;">
+      An account needs <code>role: "admin"</code> set on its Firestore user doc to sign in here — see the README.
+    </p>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const form = document.getElementById('loginForm');
+const errorBanner = document.getElementById('errorBanner');
+const signInBtn = document.getElementById('signInBtn');
+
+auth.onAuthStateChanged(async user=>{
+  if(user){
+    const doc = await db.collection('users').doc(user.uid).get();
+    if(doc.exists && doc.data().role === 'admin'){
+      window.location.href = "requests.html";
+    }
+  }
+});
+
+form.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  errorBanner.style.display = "none";
+  signInBtn.disabled = true;
+  signInBtn.innerHTML = '<span class="spinner"></span> Signing in…';
+
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  try{
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    const doc = await db.collection('users').doc(cred.user.uid).get();
+    if(!doc.exists || doc.data().role !== 'admin'){
+      errorBanner.textContent = "This account isn't an admin account.";
+      errorBanner.style.display = "block";
+      await auth.signOut();
+      signInBtn.disabled = false;
+      signInBtn.textContent = "Sign In";
+      return;
+    }
+    window.location.href = "requests.html";
+  } catch(err){
+    errorBanner.textContent = "Couldn't sign in. Please check your details and try again.";
+    errorBanner.style.display = "block";
+    signInBtn.disabled = false;
+    signInBtn.textContent = "Sign In";
+  }
+});
+</script>
+</body>
+</html>
