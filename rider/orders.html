@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Available Deliveries · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   .menu-section{ background:var(--paper); border-radius:14px; overflow:hidden; box-shadow:var(--shadow); margin-bottom:16px; }
   .menu-section-title{
@@ -91,6 +92,7 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -119,6 +121,7 @@ requireAuth(async user=>{
   const firstName = (doc.data().name || "").split(" ")[0];
   document.getElementById('greeting').textContent = firstName ? `Hi, ${firstName} 👋` : "Hi there 👋";
 
+  initMap();
   startRiderLiveLocation();
   listenToPendingOrders();
   watchForRiderConfirmations(user.uid);
@@ -131,14 +134,18 @@ requireAuth(async user=>{
   });
 });
 
+const orderIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#0C4A45;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+
 function initMap(){
-  map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 14.6760, lng: 121.0437 }, // Quezon City
-    zoom: 12,
-    disableDefaultUI: true,
-    gestureHandling: 'greedy',
-    zoomControl: true,
-  });
+  map = L.map('map', { zoomControl: true }).setView([14.6760, 121.0437], 12); // Quezon City
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
 }
 
 /* Live location for the rider — updates the header pill with a readable
@@ -150,7 +157,7 @@ function startRiderLiveLocation(){
   navigator.geolocation.watchPosition(
     pos=>{
       riderLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      if(map) map.setCenter(riderLocation);
+      if(map) map.panTo([riderLocation.lat, riderLocation.lng]);
       updateLocationPill(riderLocation);
       renderOrdersList();
       broadcastRiderProfileLocation(riderLocation);
@@ -191,7 +198,7 @@ function broadcastRiderProfileLocation(pos){
 }
 
 function clearMarkers(){
-  markers.forEach(m=>m.setMap(null));
+  markers.forEach(m=>map.removeLayer(m));
   markers = [];
 }
 
@@ -314,16 +321,9 @@ function renderOrdersList(){
     const o = doc.data();
 
     if(map && o.pickup){
-      const marker = new google.maps.Marker({
-        position: { lat: o.pickup.lat, lng: o.pickup.lng },
-        map,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 8, fillColor: '#0C4A45', fillOpacity: 1,
-          strokeColor: '#fff', strokeWeight: 2
-        },
-        title: o.pickup.address
-      });
+      const marker = L.marker([o.pickup.lat, o.pickup.lng], {
+        icon: orderIcon, title: o.pickup.address
+      }).addTo(map);
       markers.push(marker);
     }
 
@@ -388,6 +388,5 @@ document.getElementById('logoutLink').addEventListener('click', async (e)=>{
   window.location.href = "index.html";
 });
 </script>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCJ2QThH1zXt-7U5HlbvSk2f2S33IsrHic&callback=initMap" async defer></script>
 </body>
 </html>

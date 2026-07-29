@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Current Order · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   body{ background:var(--paper); }
   .map-wrap{ position:relative; height:38vh; min-height:230px; }
@@ -108,6 +109,7 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -128,14 +130,30 @@ requireAuth(user=>{
   loadOrder();
 });
 
+initMap();
+
+const riderIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#F0A93A;border:2px solid #082F2B;box-shadow:0 0 0 2px #fff;"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+const pickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#2F8F5B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [18,18], iconAnchor: [9,9]
+});
+const dropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:20px;line-height:1;">🏁</div>',
+  iconSize: [20,20], iconAnchor: [10,20]
+});
+
 function initMap(){
-  map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 14.6760, lng: 121.0437 },
-    zoom: 13,
-    disableDefaultUI: true,
-    gestureHandling: 'greedy',
-    zoomControl: true,
-  });
+  map = L.map('map', { zoomControl: true }).setView([14.6760, 121.0437], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
 
   if(navigator.geolocation){
     watchId = navigator.geolocation.watchPosition(pos=>{
@@ -150,18 +168,11 @@ function initMap(){
 }
 
 function updateRiderMarker(pos){
+  const latlng = [pos.lat, pos.lng];
   if(!riderMarker){
-    riderMarker = new google.maps.Marker({
-      position: pos, map,
-      icon: {
-        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-        scale: 5, fillColor: '#F0A93A', fillOpacity: 1,
-        strokeColor: '#082F2B', strokeWeight: 1.5
-      },
-      title: 'You'
-    });
+    riderMarker = L.marker(latlng, { icon: riderIcon, title: 'You', zIndexOffset: 1000 }).addTo(map);
   } else {
-    riderMarker.setPosition(pos);
+    riderMarker.setLatLng(latlng);
   }
 }
 
@@ -183,44 +194,33 @@ function updateVisuals(){
   const o = orderData;
 
   if(!pickupMarker){
-    pickupMarker = new google.maps.Marker({
-      position: { lat: o.pickup.lat, lng: o.pickup.lng }, map,
-      icon:{ path: google.maps.SymbolPath.CIRCLE, scale:9,
-        fillColor: '#2F8F5B', fillOpacity:1, strokeColor:'#fff', strokeWeight:2 },
-      title: 'Pickup'
-    });
+    pickupMarker = L.marker([o.pickup.lat, o.pickup.lng], { icon: pickupIcon, title: 'Pickup' }).addTo(map);
   }
   if(!dropoffMarker){
-    dropoffMarker = new google.maps.Marker({
-      position: { lat: o.dropoff.lat, lng: o.dropoff.lng }, map,
-      label: { text: '🏁', fontSize: '16px' },
-      title: 'Drop-off'
-    });
+    dropoffMarker = L.marker([o.dropoff.lat, o.dropoff.lng], { icon: dropoffIcon, title: 'Drop-off' }).addTo(map);
   }
 
-  const bounds = new google.maps.LatLngBounds();
-  bounds.extend({ lat: o.pickup.lat, lng: o.pickup.lng });
-  bounds.extend({ lat: o.dropoff.lat, lng: o.dropoff.lng });
+  const boundsPoints = [
+    [o.pickup.lat, o.pickup.lng],
+    [o.dropoff.lat, o.dropoff.lng]
+  ];
 
   if(riderMarker){
-    const riderPos = riderMarker.getPosition().toJSON();
-    bounds.extend(riderPos);
+    const riderPos = riderMarker.getLatLng();
+    boundsPoints.push([riderPos.lat, riderPos.lng]);
 
-    if(straightLine) straightLine.setMap(null);
-    straightLine = new google.maps.Polyline({
-      path: [riderPos, { lat: o.pickup.lat, lng: o.pickup.lng }],
-      geodesic: true, strokeColor: '#0C4A45', strokeOpacity: 0.7, strokeWeight: 3,
-      icons: [{ icon:{ path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '14px' }],
-      map
-    });
+    if(straightLine) map.removeLayer(straightLine);
+    straightLine = L.polyline([riderPos, [o.pickup.lat, o.pickup.lng]], {
+      color: '#0C4A45', weight: 3, opacity: 0.7, dashArray: '4, 8'
+    }).addTo(map);
 
-    const kmToPickup = distanceKmBetween(riderPos, { lat: o.pickup.lat, lng: o.pickup.lng });
+    const kmToPickup = distanceKmBetween({ lat: riderPos.lat, lng: riderPos.lng }, { lat: o.pickup.lat, lng: o.pickup.lng });
     const mins = Math.max(1, Math.round((kmToPickup / ASSUMED_SPEED_KMH) * 60));
     document.getElementById('statToAddress').textContent = kmToPickup.toFixed(1) + ' km';
     document.getElementById('statEta').textContent = mins + ' min';
   }
 
-  map.fitBounds(bounds, 70);
+  map.fitBounds(boundsPoints, { padding: [70, 70] });
 }
 
 async function loadOrder(){
@@ -292,6 +292,5 @@ window.addEventListener('beforeunload', ()=>{
   if(watchId) navigator.geolocation.clearWatch(watchId);
 });
 </script>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCJ2QThH1zXt-7U5HlbvSk2f2S33IsrHic&callback=initMap" async defer></script>
 </body>
 </html>
