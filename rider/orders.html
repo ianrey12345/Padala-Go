@@ -129,6 +129,7 @@ function startRiderLiveLocation(){
       if(map) map.setCenter(riderLocation);
       updateLocationPill(riderLocation);
       renderOrdersList();
+      broadcastRiderProfileLocation(riderLocation);
     },
     ()=>{ /* silently ignore — falls back to newest-first ordering */ },
     { enableHighAccuracy: true }
@@ -150,6 +151,19 @@ async function updateLocationPill(point){
       document.getElementById('locationPill').style.display = 'inline-flex';
     }
   } catch(e){ /* ignore */ }
+}
+
+let lastProfileLocationWriteAt = 0;
+function broadcastRiderProfileLocation(pos){
+  // Throttled so a rider just browsing pending orders doesn't hammer Firestore.
+  // Lets customers see an ETA for each rider who's requested, before confirming.
+  const now = Date.now();
+  if(now - lastProfileLocationWriteAt < 8000) return;
+  lastProfileLocationWriteAt = now;
+  db.collection('users').doc(currentUser.uid).update({
+    liveLocation: pos,
+    liveLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(()=>{ /* ignore transient failures */ });
 }
 
 function clearMarkers(){

@@ -142,6 +142,7 @@ function initMap(){
       const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       updateRiderMarker(riderPos);
       if(orderData) updateVisuals();
+      broadcastRiderProfileLocation(riderPos);
     }, ()=>{}, { enableHighAccuracy: true });
   }
 
@@ -162,6 +163,19 @@ function updateRiderMarker(pos){
   } else {
     riderMarker.setPosition(pos);
   }
+}
+
+let lastProfileLocationWriteAt = 0;
+function broadcastRiderProfileLocation(pos){
+  // Throttled so a rider just browsing this order doesn't hammer Firestore.
+  // Lets customers see an ETA for this rider before deciding to confirm them.
+  const now = Date.now();
+  if(now - lastProfileLocationWriteAt < 8000) return;
+  lastProfileLocationWriteAt = now;
+  db.collection('users').doc(currentUser.uid).update({
+    liveLocation: pos,
+    liveLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(()=>{ /* ignore transient failures */ });
 }
 
 function updateVisuals(){

@@ -59,6 +59,7 @@
 const params = new URLSearchParams(window.location.search);
 const orderId = params.get('id');
 let currentUser = null;
+let currentOrderData = null;
 
 requireAuth(user=>{
   currentUser = user;
@@ -68,6 +69,39 @@ requireAuth(user=>{
 
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
 
+let etaDeadlineMs = null;
+let etaCountdownTimer = null;
+
+function startEtaCountdown(){
+  if(etaCountdownTimer) return; // already ticking — recalibration just moved the deadline
+  tickEtaCountdown();
+  etaCountdownTimer = setInterval(tickEtaCountdown, 1000);
+}
+
+function stopEtaCountdown(){
+  if(etaCountdownTimer){
+    clearInterval(etaCountdownTimer);
+    etaCountdownTimer = null;
+  }
+  etaDeadlineMs = null;
+}
+
+function tickEtaCountdown(){
+  if(etaDeadlineMs === null) return;
+  const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
+  const etaText = document.getElementById('etaText');
+  if(!etaText) return;
+  if(secsLeft <= 0){
+    etaText.textContent = "Rider arriving any moment…";
+  } else {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    etaText.textContent = m > 0
+      ? `Rider arriving in ${m}m ${s.toString().padStart(2,'0')}s`
+      : `Rider arriving in ${s}s`;
+  }
+}
+
 function listenToOrder(){
   db.collection('orders').doc(orderId).onSnapshot(doc=>{
     if(!doc.exists){
@@ -75,6 +109,7 @@ function listenToOrder(){
       return;
     }
     const o = doc.data();
+    currentOrderData = o;
     renderOrder(o);
 
     if(o.status === 'pending'){
@@ -103,16 +138,21 @@ function listenToOrder(){
         const km = distanceKmBetween(o.riderLocation, { lat: o.pickup.lat, lng: o.pickup.lng });
         const mins = Math.max(1, Math.round((km / 25) * 60)); // same assumed speed as the rider's live map
         etaBanner.style.display = 'block';
-        document.getElementById('etaText').textContent = `Rider arriving in ~${mins} min`;
         document.getElementById('etaSub').textContent = `${km.toFixed(1)} km away`;
+        // Recalibrate the countdown deadline against this fresh location fix —
+        // keeps the per-second tick honest as the rider's actual position updates.
+        etaDeadlineMs = Date.now() + mins * 60000;
+        startEtaCountdown();
       } else {
         etaBanner.style.display = 'none';
+        stopEtaCountdown();
       }
 
       const arrivedBanner = document.getElementById('arrivedBanner');
       if(o.arrivedAtPickup){
         arrivedBanner.style.display = 'block';
         document.getElementById('arrivedTime').textContent = o.arrivedAtPickupAt ? timeAgo(o.arrivedAtPickupAt) : '';
+        stopEtaCountdown();
       } else {
         arrivedBanner.style.display = 'none';
       }
@@ -145,7 +185,7 @@ function listenToRequests(){
         return;
       }
       list.innerHTML = '';
-      snap.forEach(reqDoc=>{
+      snap.forEach(async reqDoc=>{
         const r = reqDoc.data();
         const row = document.createElement('div');
         row.className = 'order-card';
@@ -153,7 +193,7 @@ function listenToRequests(){
           <div class="rider-request-row" style="border-top:none; padding-top:0;">
             <div>
               <div class="name">${r.riderName}</div>
-              <div class="when">${timeAgo(r.createdAt)}</div>
+              <div class="when" id="eta-${reqDoc.id}">${timeAgo(r.createdAt)}</div>
             </div>
             <button class="btn btn-amber btn-sm" data-rider-id="${r.riderId}" data-req-id="${reqDoc.id}">Confirm</button>
           </div>
@@ -162,6 +202,20 @@ function listenToRequests(){
           confirmRider(e.target.dataset.riderId, e.target.dataset.reqId);
         });
         list.appendChild(row);
+
+        // Show this rider's estimated time to the pickup point, if their
+        // live location is available — helps the customer choose who to confirm.
+        if(currentOrderData && currentOrderData.pickup){
+          try{
+            const riderDoc = await db.collection('users').doc(r.riderId).get();
+            if(riderDoc.exists && riderDoc.data().liveLocation){
+              const km = distanceKmBetween(riderDoc.data().liveLocation, { lat: currentOrderData.pickup.lat, lng: currentOrderData.pickup.lng });
+              const mins = Math.max(1, Math.round((km / 25) * 60));
+              const etaEl = document.getElementById(`eta-${reqDoc.id}`);
+              if(etaEl) etaEl.textContent = `~${mins} min away (${km.toFixed(1)} km) · requested ${timeAgo(r.createdAt)}`;
+            }
+          } catch(e){ /* leave the default "requested X ago" text */ }
+        }
       });
     });
 }
