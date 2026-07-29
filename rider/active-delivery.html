@@ -93,8 +93,23 @@ function initMap(){
       const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       updateRiderMarker(riderPos);
       if(orderData) updateRouteVisuals();
+      broadcastRiderLocation(riderPos);
     }, ()=>{}, { enableHighAccuracy: true });
   }
+}
+
+let lastLocationWriteAt = 0;
+function broadcastRiderLocation(pos){
+  // Throttled to avoid writing to Firestore on every GPS tick — the customer's
+  // ETA readout only needs an update every few seconds, not continuously.
+  const now = Date.now();
+  if(now - lastLocationWriteAt < 4000) return;
+  lastLocationWriteAt = now;
+  if(!orderId) return;
+  db.collection('orders').doc(orderId).update({
+    riderLocation: pos,
+    riderLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(()=>{ /* order may not exist yet on first tick — ignore */ });
 }
 
 function updateRiderMarker(pos){

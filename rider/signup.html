@@ -33,6 +33,10 @@
         <input type="text" id="plate" placeholder="e.g. ABC 1234" required>
       </div>
       <div class="field">
+        <label for="motorColor">Motorbike color</label>
+        <input type="text" id="motorColor" placeholder="e.g. Red" required>
+      </div>
+      <div class="field">
         <label for="email">Email</label>
         <input type="email" id="email" placeholder="you@email.com" required>
       </div>
@@ -68,13 +72,14 @@ form.addEventListener('submit', async (e)=>{
   const name = document.getElementById('name').value.trim();
   const phone = document.getElementById('phone').value.trim();
   const plate = document.getElementById('plate').value.trim();
+  const motorColor = document.getElementById('motorColor').value.trim();
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
 
   try{
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     await db.collection('users').doc(cred.user.uid).set({
-      name, phone, plate, email,
+      name, phone, plate, motorColor, email,
       role: 'rider',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
