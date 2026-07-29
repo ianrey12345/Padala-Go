@@ -6,15 +6,22 @@
 <title>Available Deliveries · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
 <style>
-  .filter-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:10px; -webkit-overflow-scrolling:touch; }
-  .filter-row::-webkit-scrollbar{ display:none; }
-  .filter-chip{
-    flex:0 0 auto; padding:8px 14px; border-radius:20px; font-size:12.5px; font-weight:600;
-    background:var(--paper); color:var(--teal-dark); border:1.5px solid var(--line);
-    cursor:pointer; white-space:nowrap; user-select:none;
+  .menu-section{ background:var(--paper); border-radius:14px; overflow:hidden; box-shadow:var(--shadow); margin-bottom:16px; }
+  .menu-section-title{
+    padding:10px 16px; font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.07em; color:#8A8178; background:var(--cream);
   }
-  .filter-chip.active{ background:var(--teal); color:#fff; border-color:var(--teal); }
-  .place-chip.active{ background:var(--amber); color:var(--teal-dark); border-color:var(--amber); }
+  .menu-row{
+    display:flex; justify-content:space-between; align-items:center; padding:14px 16px;
+    border-bottom:1px solid var(--line); border-left:4px solid transparent;
+    cursor:pointer; user-select:none;
+  }
+  .menu-row:last-child{ border-bottom:none; }
+  .menu-row.active{ border-left-color:var(--amber); background:#FFF9EF; }
+  .menu-row .row-label{ font-size:14px; color:var(--ink); font-weight:500; }
+  .menu-row .row-right{ display:flex; align-items:center; gap:8px; }
+  .menu-row .row-count{ color:var(--teal); font-weight:700; font-family:'Space Mono'; font-size:13px; }
+  .menu-row .chevron{ color:#C7BFB2; font-size:15px; }
   .location-pill{
     display:inline-flex; align-items:center; gap:5px; background:rgba(255,255,255,0.15);
     color:#fff; font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; margin-top:4px;
@@ -33,13 +40,26 @@
   <div class="content">
     <div id="map" style="margin-bottom:14px;"></div>
 
-    <div class="filter-row" id="categoryFilters">
-      <div class="filter-chip active" data-category="all">All</div>
-      <div class="filter-chip" data-category="bike_delivery">🏍️ Bike Delivery</div>
-      <div class="filter-chip" data-category="padala_pabili">🧾 Padala/Pabili</div>
+    <div class="menu-section" id="categoryFilters">
+      <div class="menu-section-title">Categories</div>
+      <div class="menu-row active" data-category="all">
+        <span class="row-label">All</span>
+        <span class="row-right"><span class="row-count" id="count-all">0</span><span class="chevron">›</span></span>
+      </div>
+      <div class="menu-row" data-category="bike_delivery">
+        <span class="row-label">🏍️ Bike Delivery</span>
+        <span class="row-right"><span class="row-count" id="count-bike_delivery">0</span><span class="chevron">›</span></span>
+      </div>
+      <div class="menu-row" data-category="padala_pabili">
+        <span class="row-label">🧾 Padala/Pabili</span>
+        <span class="row-right"><span class="row-count" id="count-padala_pabili">0</span><span class="chevron">›</span></span>
+      </div>
     </div>
 
-    <div class="filter-row" id="placeFilters" style="display:none;"></div>
+    <div class="menu-section" id="zonesSection" style="display:none;">
+      <div class="menu-section-title">Zones</div>
+      <div id="placeFilters"></div>
+    </div>
 
     <h3 style="font-size:15px; margin-bottom:8px;">Pending Requests</h3>
     <div id="ordersList">
@@ -149,37 +169,63 @@ function listenToPendingOrders(){
         requestedMap[doc.id] = reqDoc.exists && reqDoc.data().status !== 'declined';
       }));
       renderPlaceFilters();
+      updateCategoryCounts();
       renderOrdersList();
     });
 }
 
 function renderPlaceFilters(){
-  const places = new Set();
+  const counts = {};
   allPendingOrders.forEach(doc=>{
     const m = doc.data().pickup && doc.data().pickup.municipality;
-    if(m) places.add(m);
+    if(m) counts[m] = (counts[m] || 0) + 1;
   });
 
+  const zonesSection = document.getElementById('zonesSection');
   const container = document.getElementById('placeFilters');
-  if(places.size === 0){
-    container.style.display = 'none';
+  const places = Object.keys(counts);
+
+  if(places.length === 0){
+    zonesSection.style.display = 'none';
     container.innerHTML = '';
     return;
   }
-  container.style.display = 'flex';
-  const chips = [`<div class="filter-chip place-chip ${activePlace==='all' ? 'active' : ''}" data-place="all">📍 All Places</div>`];
-  Array.from(places).sort().forEach(p=>{
-    chips.push(`<div class="filter-chip place-chip ${activePlace===p ? 'active' : ''}" data-place="${p}">${p}</div>`);
-  });
-  container.innerHTML = chips.join('');
+  zonesSection.style.display = 'block';
 
-  container.querySelectorAll('.place-chip').forEach(chip=>{
-    chip.addEventListener('click', ()=>{
-      activePlace = chip.dataset.place;
+  const rows = [`
+    <div class="menu-row ${activePlace==='all' ? 'active' : ''}" data-place="all">
+      <span class="row-label">📍 All Places</span>
+      <span class="row-right"><span class="row-count">${allPendingOrders.length}</span><span class="chevron">›</span></span>
+    </div>
+  `];
+  places.sort().forEach(p=>{
+    rows.push(`
+      <div class="menu-row ${activePlace===p ? 'active' : ''}" data-place="${p}">
+        <span class="row-label">${p}</span>
+        <span class="row-right"><span class="row-count">${counts[p]}</span><span class="chevron">›</span></span>
+      </div>
+    `);
+  });
+  container.innerHTML = rows.join('');
+
+  container.querySelectorAll('.menu-row').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      activePlace = row.dataset.place;
       renderPlaceFilters();
       renderOrdersList();
     });
   });
+}
+
+function updateCategoryCounts(){
+  const counts = { all: allPendingOrders.length, bike_delivery: 0, padala_pabili: 0 };
+  allPendingOrders.forEach(doc=>{
+    const t = doc.data().serviceType;
+    if(counts[t] !== undefined) counts[t]++;
+  });
+  document.getElementById('count-all').textContent = counts.all;
+  document.getElementById('count-bike_delivery').textContent = counts.bike_delivery;
+  document.getElementById('count-padala_pabili').textContent = counts.padala_pabili;
 }
 
 function renderOrdersList(){
@@ -266,11 +312,11 @@ function renderOrdersList(){
   });
 }
 
-document.getElementById('categoryFilters').querySelectorAll('.filter-chip').forEach(chip=>{
-  chip.addEventListener('click', ()=>{
-    activeCategory = chip.dataset.category;
-    document.getElementById('categoryFilters').querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
-    chip.classList.add('active');
+document.getElementById('categoryFilters').querySelectorAll('.menu-row').forEach(row=>{
+  row.addEventListener('click', ()=>{
+    activeCategory = row.dataset.category;
+    document.getElementById('categoryFilters').querySelectorAll('.menu-row').forEach(r=>r.classList.remove('active'));
+    row.classList.add('active');
     renderOrdersList();
   });
 });
