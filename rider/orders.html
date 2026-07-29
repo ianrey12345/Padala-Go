@@ -278,6 +278,7 @@ function renderOrdersList(){
 
     const card = document.createElement('div');
     card.className = 'order-card';
+    card.style.cursor = 'pointer';
     card.innerHTML = `
       <div class="top-row">
         <span class="service-tag">${serviceLabel(o.serviceType)}</span>
@@ -291,9 +292,13 @@ function renderOrdersList(){
         ${requested ? 'Requested ✓' : 'Send Request'}
       </button>
     `;
+    card.addEventListener('click', ()=>{
+      window.location.href = `order-detail.html?id=${doc.id}`;
+    });
     const btn = card.querySelector('button');
     if(!requested){
-      btn.addEventListener('click', async ()=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
         btn.disabled = true;
         btn.textContent = 'Sending…';
         const riderDoc = await db.collection('users').doc(currentUser.uid).get();

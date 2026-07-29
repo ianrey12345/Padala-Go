@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Current Order · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  body{ background:var(--paper); }
+  .map-wrap{ position:relative; height:38vh; min-height:230px; }
+  #map{ width:100%; height:100%; }
+  .back-fab{
+    position:absolute; top:16px; left:16px; width:42px; height:42px; border-radius:50%;
+    background:#fff; box-shadow:0 4px 14px rgba(0,0,0,0.2); display:flex; align-items:center;
+    justify-content:center; font-size:20px; color:var(--teal-dark); text-decoration:none; z-index:5;
+  }
+  .sheet{
+    position:relative; margin-top:-18px; background:#fff; border-radius:22px 22px 0 0;
+    padding:18px 20px 110px; box-shadow:0 -6px 20px rgba(0,0,0,0.06); min-height:40vh;
+  }
+  .grabber{ width:40px; height:4px; background:var(--line); border-radius:4px; margin:0 auto 16px; }
+  .order-title{ font-family:'Sora'; font-weight:700; font-size:19px; color:var(--teal-dark); margin-bottom:2px; }
+  .order-subtitle{ font-size:13px; color:#8A8178; margin-bottom:16px; }
+  .fare-big{ font-family:'Space Mono'; font-weight:700; font-size:38px; color:var(--ink); line-height:1; }
+  .fare-sub{ font-size:13px; color:#8A8178; margin-bottom:20px; }
+  .point-line{ display:flex; gap:12px; }
+  .point-marks{ display:flex; flex-direction:column; align-items:center; padding-top:4px; }
+  .point-dot{ width:12px; height:12px; border-radius:50%; }
+  .point-dot.hollow{ border:2.5px solid var(--teal); background:#fff; }
+  .point-dot.filled{ background:var(--teal-dark); }
+  .point-connector{ width:2px; flex:1; background:var(--line); margin:3px 0; min-height:22px; }
+  .point-body{ padding-bottom:18px; }
+  .point-title{ font-size:15.5px; font-weight:700; color:var(--ink); }
+  .point-detail{ font-size:13px; color:#8A8178; margin-top:2px; }
+  .stats-row{ display:flex; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:16px 0; margin:8px 0 18px; }
+  .stat{ flex:1; text-align:center; }
+  .stat .val{ font-size:16px; font-weight:700; color:var(--ink); }
+  .stat .lbl{ font-size:11.5px; color:#8A8178; margin-top:2px; }
+  .msg-box{ background:var(--cream); border-radius:14px; padding:14px 16px; margin-bottom:8px; }
+  .msg-box .msg-text{ font-size:13.5px; color:var(--ink); font-style:italic; line-height:1.5; }
+  .msg-box .msg-from{ font-size:12px; color:#8A8178; margin-top:8px; }
+  .msg-box .msg-from b{ color:var(--teal-dark); }
+  .request-bar{
+    position:fixed; bottom:0; left:0; right:0; max-width:480px; margin:0 auto;
+    background:#fff; padding:14px 20px calc(14px + env(safe-area-inset-bottom));
+    box-shadow:0 -4px 16px rgba(0,0,0,0.08);
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="map-wrap">
+    <a href="orders.html" class="back-fab">←</a>
+    <div id="map"></div>
+  </div>
+
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="order-title">Current order</div>
+    <div class="order-subtitle" id="orderSubtitle">Padala Go</div>
+
+    <div class="fare-big" id="fareBig">₱—</div>
+    <div class="fare-sub">in cash</div>
+
+    <div class="point-line">
+      <div class="point-marks">
+        <div class="point-dot hollow"></div>
+        <div class="point-connector"></div>
+      </div>
+      <div class="point-body">
+        <div class="point-title" id="pickupTitle">Loading…</div>
+        <div class="point-detail" id="pickupDetail"></div>
+      </div>
+    </div>
+    <div class="point-line">
+      <div class="point-marks">
+        <div class="point-dot filled"></div>
+      </div>
+      <div class="point-body">
+        <div class="point-title" id="dropoffTitle"></div>
+        <div class="point-detail" id="dropoffDetail"></div>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat">
+        <div class="val" id="statToAddress">—</div>
+        <div class="lbl">To address</div>
+      </div>
+      <div class="stat">
+        <div class="val" id="statEta">—</div>
+        <div class="lbl">Arrival time</div>
+      </div>
+      <div class="stat">
+        <div class="val" id="statDistance">—</div>
+        <div class="lbl">Distance</div>
+      </div>
+    </div>
+
+    <div class="msg-box" id="msgBox" style="display:none;">
+      <div class="msg-text" id="msgText"></div>
+      <div class="msg-from">Client<br><b id="msgFrom"></b></div>
+    </div>
+  </div>
+
+  <div class="request-bar">
+    <button type="button" class="btn btn-primary" id="requestBtn">Request</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const orderId = params.get('id');
+let currentUser = null;
+let orderData = null;
+let map, riderMarker, pickupMarker, dropoffMarker, straightLine, watchId;
+const ASSUMED_SPEED_KMH = 25;
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+requireAuth(user=>{
+  currentUser = user;
+  if(!orderId){ window.location.href = "orders.html"; return; }
+  loadOrder();
+});
+
+function initMap(){
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 14.6760, lng: 121.0437 },
+    zoom: 13,
+    disableDefaultUI: true,
+    gestureHandling: 'greedy',
+    zoomControl: true,
+  });
+
+  if(navigator.geolocation){
+    watchId = navigator.geolocation.watchPosition(pos=>{
+      const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      updateRiderMarker(riderPos);
+      if(orderData) updateVisuals();
+    }, ()=>{}, { enableHighAccuracy: true });
+  }
+
+  if(orderData) updateVisuals();
+}
+
+function updateRiderMarker(pos){
+  if(!riderMarker){
+    riderMarker = new google.maps.Marker({
+      position: pos, map,
+      icon: {
+        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+        scale: 5, fillColor: '#F0A93A', fillOpacity: 1,
+        strokeColor: '#082F2B', strokeWeight: 1.5
+      },
+      title: 'You'
+    });
+  } else {
+    riderMarker.setPosition(pos);
+  }
+}
+
+function updateVisuals(){
+  if(!map || !orderData) return;
+  const o = orderData;
+
+  if(!pickupMarker){
+    pickupMarker = new google.maps.Marker({
+      position: { lat: o.pickup.lat, lng: o.pickup.lng }, map,
+      icon:{ path: google.maps.SymbolPath.CIRCLE, scale:9,
+        fillColor: '#2F8F5B', fillOpacity:1, strokeColor:'#fff', strokeWeight:2 },
+      title: 'Pickup'
+    });
+  }
+  if(!dropoffMarker){
+    dropoffMarker = new google.maps.Marker({
+      position: { lat: o.dropoff.lat, lng: o.dropoff.lng }, map,
+      label: { text: '🏁', fontSize: '16px' },
+      title: 'Drop-off'
+    });
+  }
+
+  const bounds = new google.maps.LatLngBounds();
+  bounds.extend({ lat: o.pickup.lat, lng: o.pickup.lng });
+  bounds.extend({ lat: o.dropoff.lat, lng: o.dropoff.lng });
+
+  if(riderMarker){
+    const riderPos = riderMarker.getPosition().toJSON();
+    bounds.extend(riderPos);
+
+    if(straightLine) straightLine.setMap(null);
+    straightLine = new google.maps.Polyline({
+      path: [riderPos, { lat: o.pickup.lat, lng: o.pickup.lng }],
+      geodesic: true, strokeColor: '#0C4A45', strokeOpacity: 0.7, strokeWeight: 3,
+      icons: [{ icon:{ path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '14px' }],
+      map
+    });
+
+    const kmToPickup = distanceKmBetween(riderPos, { lat: o.pickup.lat, lng: o.pickup.lng });
+    const mins = Math.max(1, Math.round((kmToPickup / ASSUMED_SPEED_KMH) * 60));
+    document.getElementById('statToAddress').textContent = kmToPickup.toFixed(1) + ' km';
+    document.getElementById('statEta').textContent = mins + ' min';
+  }
+
+  map.fitBounds(bounds, 70);
+}
+
+async function loadOrder(){
+  const doc = await db.collection('orders').doc(orderId).get();
+  if(!doc.exists){
+    document.getElementById('pickupTitle').textContent = "Order not found.";
+    return;
+  }
+  orderData = doc.data();
+  const o = orderData;
+
+  document.getElementById('orderSubtitle').textContent = `Padala Go, ${serviceLabel(o.serviceType)}`;
+  document.getElementById('fareBig').textContent = fmtPeso(o.fare);
+
+  const [pTitle, ...pRest] = o.pickup.address.split(',');
+  document.getElementById('pickupTitle').textContent = pTitle.trim();
+  document.getElementById('pickupDetail').textContent = pRest.join(',').trim();
+
+  const [dTitle, ...dRest] = o.dropoff.address.split(',');
+  document.getElementById('dropoffTitle').textContent = dTitle.trim();
+  document.getElementById('dropoffDetail').textContent = dRest.join(',').trim();
+
+  document.getElementById('statDistance').textContent = o.distanceKm + ' km';
+
+  if(o.notes){
+    document.getElementById('msgBox').style.display = 'block';
+    document.getElementById('msgText').textContent = o.notes;
+    try{
+      const custDoc = await db.collection('users').doc(o.customerId).get();
+      document.getElementById('msgFrom').textContent = custDoc.exists ? custDoc.data().name : 'Customer';
+    } catch(e){
+      document.getElementById('msgFrom').textContent = 'Customer';
+    }
+  }
+
+  if(map) updateVisuals();
+
+  const reqDoc = await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).get();
+  const requested = reqDoc.exists && reqDoc.data().status !== 'declined';
+  setRequestButton(requested);
+}
+
+function setRequestButton(requested){
+  const btn = document.getElementById('requestBtn');
+  if(requested){
+    btn.textContent = 'Requested ✓';
+    btn.disabled = true;
+    btn.className = 'btn btn-outline';
+  } else {
+    btn.textContent = 'Request';
+    btn.disabled = false;
+    btn.className = 'btn btn-primary';
+    btn.onclick = async ()=>{
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      const riderDoc = await db.collection('users').doc(currentUser.uid).get();
+      await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).set({
+        riderId: currentUser.uid,
+        riderName: riderDoc.data().name,
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      setRequestButton(true);
+    };
+  }
+}
+
+window.addEventListener('beforeunload', ()=>{
+  if(watchId) navigator.geolocation.clearWatch(watchId);
+});
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCJ2QThH1zXt-7U5HlbvSk2f2S33IsrHic&callback=initMap" async defer></script>
+</body>
+</html>
