@@ -157,11 +157,29 @@ function clearMarkers(){
   markers = [];
 }
 
+let isFirstOrdersSnapshot = true;
+
 function listenToPendingOrders(){
   db.collection('orders')
     .where('status','==','pending')
     .orderBy('createdAt','desc')
     .onSnapshot(async snap=>{
+      // Alert on new incoming orders — but not for the batch that's already
+      // pending the moment the rider opens the app, only ones that arrive
+      // while they're online and watching this screen.
+      if(!isFirstOrdersSnapshot){
+        const newOnes = snap.docChanges().filter(c => c.type === 'added');
+        if(newOnes.length > 0){
+          playRingtone();
+          const msg = newOnes.length === 1
+            ? '🔔 New delivery request available!'
+            : `🔔 ${newOnes.length} new delivery requests available!`;
+          showToast(msg);
+          showBrowserNotification('New Delivery Available', 'A new order just came in — open the app to view it.');
+        }
+      }
+      isFirstOrdersSnapshot = false;
+
       allPendingOrders = snap.docs;
       requestedMap = {};
       await Promise.all(snap.docs.map(async doc=>{
