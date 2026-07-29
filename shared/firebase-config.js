@@ -105,26 +105,74 @@ async function completeOrderWithCommission(orderId, riderId, fare){
   return commission;
 }
 
-/* Self-service top-up (simulated — no real payment gateway wired up yet).
-   Adds `amount` pesos to the rider's wallet and logs the transaction. */
-async function refillWallet(riderId, amount){
-  const riderRef = db.collection('users').doc(riderId);
-  const txnRef = riderRef.collection('walletTransactions').doc();
+/* Rider submits a top-up amount — this does NOT credit the wallet yet.
+   It creates a pending request that an admin must approve. */
+async function submitRefillRequest(riderId, riderName, amount){
+  return db.collection('refillRequests').add({
+    riderId, riderName, amount,
+    status: 'pending',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
 
-  let newBalance;
+/* Rider can cancel their own request while it's still pending. */
+async function cancelRefillRequest(requestId){
+  return db.collection('refillRequests').doc(requestId).delete();
+}
+
+/* Admin approves a pending request: credits the rider's wallet and logs
+   the transaction, atomically, so a request can never be double-approved
+   or approved without actually crediting the balance. */
+async function approveRefillRequest(requestId, adminUid){
+  const reqRef = db.collection('refillRequests').doc(requestId);
+
   await db.runTransaction(async (t)=>{
+    const reqSnap = await t.get(reqRef);
+    if(!reqSnap.exists) throw new Error('Request not found.');
+    const req = reqSnap.data();
+    if(req.status !== 'pending') throw new Error('This request was already reviewed.');
+
+    const riderRef = db.collection('users').doc(req.riderId);
     const riderSnap = await t.get(riderRef);
     const currentBalance = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
-    newBalance = currentBalance + amount;
-    t.update(riderRef, { walletBalance: newBalance });
+    const txnRef = riderRef.collection('walletTransactions').doc();
+
+    t.update(reqRef, {
+      status: 'approved',
+      reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      reviewedBy: adminUid
+    });
+    t.update(riderRef, { walletBalance: currentBalance + req.amount });
     t.set(txnRef, {
       type: 'refill',
-      amount: amount,
+      amount: req.amount,
+      requestId: requestId,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   });
+}
 
-  return newBalance;
+/* Admin rejects a pending request — no wallet change, just marks it reviewed. */
+async function rejectRefillRequest(requestId, adminUid){
+  return db.collection('refillRequests').doc(requestId).update({
+    status: 'rejected',
+    reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    reviewedBy: adminUid
+  });
+}
+
+/* Gate for admin-only pages. Redirects non-admins back to admin sign-in. */
+function requireAdminAuth(onReady){
+  auth.onAuthStateChanged(async user=>{
+    if(!user){ window.location.href = "index.html"; return; }
+    const doc = await db.collection('users').doc(user.uid).get();
+    if(!doc.exists || doc.data().role !== 'admin'){
+      await auth.signOut();
+      window.location.href = "index.html";
+      return;
+    }
+    onReady(user, doc.data());
+  });
 }
 
 /* Live-updates a header element with the rider's current wallet balance.
