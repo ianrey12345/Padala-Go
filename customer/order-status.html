@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Status · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar plain">
+    <a href="my-orders.html" class="back">← My Orders</a>
+    <h1 style="color:#fff; font-size:19px;">Order Status</h1>
+  </div>
+
+  <div class="content" id="content">
+    <div class="order-card" id="orderCard">Loading order…</div>
+
+    <div id="requestsSection" style="margin-top:20px; display:none;">
+      <h3 style="font-size:15px;">Riders who requested this delivery</h3>
+      <div id="requestsList"></div>
+    </div>
+
+    <div id="confirmedSection" style="margin-top:20px; display:none;">
+      <div class="order-card">
+        <div class="top-row">
+          <span class="status-badge status-confirmed">Rider confirmed</span>
+        </div>
+        <div class="route" id="confirmedRiderName"></div>
+      </div>
+      <div class="order-card" id="arrivedBanner" style="display:none; margin-top:10px; background:#FDF1DC; border-color:#F0D9A8;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:22px;">🛵</div>
+          <div>
+            <div style="font-weight:700; color:#B67A16; font-size:13.5px;">Your rider has arrived at the pickup point</div>
+            <div style="font-size:12px; color:#8A8178;" id="arrivedTime"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const orderId = params.get('id');
+let currentUser = null;
+
+requireAuth(user=>{
+  currentUser = user;
+  if(!orderId){ window.location.href = "my-orders.html"; return; }
+  listenToOrder();
+});
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+function listenToOrder(){
+  db.collection('orders').doc(orderId).onSnapshot(doc=>{
+    if(!doc.exists){
+      document.getElementById('orderCard').textContent = "Order not found.";
+      return;
+    }
+    const o = doc.data();
+    renderOrder(o);
+
+    if(o.status === 'pending'){
+      document.getElementById('requestsSection').style.display = 'block';
+      document.getElementById('confirmedSection').style.display = 'none';
+      listenToRequests();
+    } else if(o.status === 'confirmed' || o.status === 'in_progress' || o.status === 'completed'){
+      document.getElementById('requestsSection').style.display = 'none';
+      document.getElementById('confirmedSection').style.display = 'block';
+      if(o.riderId){
+        db.collection('users').doc(o.riderId).get().then(rd=>{
+          document.getElementById('confirmedRiderName').textContent =
+            rd.exists ? `Rider: ${rd.data().name}` : '';
+        });
+      }
+      const arrivedBanner = document.getElementById('arrivedBanner');
+      if(o.arrivedAtPickup){
+        arrivedBanner.style.display = 'block';
+        document.getElementById('arrivedTime').textContent = o.arrivedAtPickupAt ? timeAgo(o.arrivedAtPickupAt) : '';
+      } else {
+        arrivedBanner.style.display = 'none';
+      }
+    }
+  });
+}
+
+function renderOrder(o){
+  document.getElementById('orderCard').innerHTML = `
+    <div class="top-row">
+      <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+      <span class="fare-tag">${fmtPeso(o.fare)}</span>
+    </div>
+    <div class="route">📍 ${o.pickup.address}</div>
+    <div class="route">🎯 ${o.dropoff.address}</div>
+    ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+    <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+  `;
+}
+
+let unsubRequests = null;
+function listenToRequests(){
+  if(unsubRequests) return;
+  unsubRequests = db.collection('orders').doc(orderId).collection('requests')
+    .where('status','==','pending')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('requestsList');
+      if(snap.empty){
+        list.innerHTML = `<div class="empty-state"><div class="glyph">🔎</div>Waiting for a rider to request this delivery…</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      snap.forEach(reqDoc=>{
+        const r = reqDoc.data();
+        const row = document.createElement('div');
+        row.className = 'order-card';
+        row.innerHTML = `
+          <div class="rider-request-row" style="border-top:none; padding-top:0;">
+            <div>
+              <div class="name">${r.riderName}</div>
+              <div class="when">${timeAgo(r.createdAt)}</div>
+            </div>
+            <button class="btn btn-amber btn-sm" data-rider-id="${r.riderId}" data-req-id="${reqDoc.id}">Confirm</button>
+          </div>
+        `;
+        row.querySelector('button').addEventListener('click', (e)=>{
+          confirmRider(e.target.dataset.riderId, e.target.dataset.reqId);
+        });
+        list.appendChild(row);
+      });
+    });
+}
+
+async function confirmRider(riderId, reqId){
+  const batch = db.batch();
+  const orderRef = db.collection('orders').doc(orderId);
+  batch.update(orderRef, {
+    status: 'confirmed',
+    riderId,
+    riderAccepted: null,
+    riderDecisionDeadline: firebase.firestore.Timestamp.fromMillis(Date.now() + 15000)
+  });
+  batch.update(orderRef.collection('requests').doc(reqId), { status: 'accepted' });
+
+  // Decline all other pending requests
+  const others = await orderRef.collection('requests').where('status','==','pending').get();
+  others.forEach(d=>{
+    if(d.id !== reqId){
+      batch.update(d.ref, { status: 'declined' });
+    }
+  });
+
+  await batch.commit();
+}
+</script>
+</body>
+</html>

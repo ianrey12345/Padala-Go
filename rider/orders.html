@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Available Deliveries · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="eyebrow">Padala Go Rider</div>
+    <h1 id="greeting">Hi there 👋</h1>
+    <div class="sub">Available deliveries near you</div>
+  </div>
+
+  <div class="content">
+    <div id="map" style="margin-bottom:14px;"></div>
+
+    <h3 style="font-size:15px; margin-bottom:8px;">Pending Requests</h3>
+    <div id="ordersList">
+      <div class="empty-state">Loading available orders…</div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html" class="active"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html"><span class="g">📋</span>Current</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let currentUser = null;
+let map;
+let markers = [];
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+requireAuth(async user=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    // wrong role for this app — send to rider sign-in
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  const firstName = (doc.data().name || "").split(" ")[0];
+  document.getElementById('greeting').textContent = firstName ? `Hi, ${firstName} 👋` : "Hi there 👋";
+
+  listenToPendingOrders();
+  watchForRiderConfirmations(user.uid);
+});
+
+function initMap(){
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 14.6760, lng: 121.0437 }, // Quezon City
+    zoom: 12,
+    disableDefaultUI: true,
+    zoomControl: true,
+  });
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(pos=>{
+      map.setCenter({lat: pos.coords.latitude, lng: pos.coords.longitude});
+    });
+  }
+}
+
+function clearMarkers(){
+  markers.forEach(m=>m.setMap(null));
+  markers = [];
+}
+
+function listenToPendingOrders(){
+  db.collection('orders')
+    .where('status','==','pending')
+    .orderBy('createdAt','desc')
+    .onSnapshot(async snap=>{
+      clearMarkers();
+      const list = document.getElementById('ordersList');
+      if(snap.empty){
+        list.innerHTML = `<div class="empty-state"><div class="glyph">🌤️</div>No pending deliveries right now.</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      for(const doc of snap.docs){
+        const o = doc.data();
+
+        if(map && o.pickup){
+          const marker = new google.maps.Marker({
+            position: { lat: o.pickup.lat, lng: o.pickup.lng },
+            map,
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 8, fillColor: '#0C4A45', fillOpacity: 1,
+              strokeColor: '#fff', strokeWeight: 2
+            },
+            title: o.pickup.address
+          });
+          markers.push(marker);
+        }
+
+        const alreadyRequested = await doc.ref.collection('requests').doc(currentUser.uid).get();
+        const requested = alreadyRequested.exists && alreadyRequested.data().status !== 'declined';
+
+        const card = document.createElement('div');
+        card.className = 'order-card';
+        card.innerHTML = `
+          <div class="top-row">
+            <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+            <span class="fare-tag">${fmtPeso(o.fare)}</span>
+          </div>
+          <div class="route">📍 ${o.pickup.address}</div>
+          <div class="route">🎯 ${o.dropoff.address}</div>
+          <div class="route">📏 ${o.distanceKm} km</div>
+          ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+          <button class="btn ${requested ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:10px;" ${requested ? 'disabled' : ''}>
+            ${requested ? 'Requested ✓' : 'Send Request'}
+          </button>
+        `;
+        const btn = card.querySelector('button');
+        if(!requested){
+          btn.addEventListener('click', async ()=>{
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            const riderDoc = await db.collection('users').doc(currentUser.uid).get();
+            await doc.ref.collection('requests').doc(currentUser.uid).set({
+              riderId: currentUser.uid,
+              riderName: riderDoc.data().name,
+              status: 'pending',
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            btn.textContent = 'Requested ✓';
+            btn.className = 'btn btn-outline btn-sm';
+          });
+        }
+        list.appendChild(card);
+      }
+    });
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCJ2QThH1zXt-7U5HlbvSk2f2S33IsrHic&callback=initMap" async defer></script>
+</body>
+</html>

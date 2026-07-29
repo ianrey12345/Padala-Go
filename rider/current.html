@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Current · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="eyebrow">Padala Go Rider</div>
+    <h1>Current</h1>
+    <div class="sub">Your active delivery and order history</div>
+  </div>
+
+  <div class="content">
+    <div id="activeSection" style="display:none; margin-bottom:24px;">
+      <h3 style="font-size:15px; margin-bottom:8px;">Your Active Delivery</h3>
+      <div id="activeCard"></div>
+    </div>
+
+    <h3 style="font-size:15px; margin-bottom:8px;">Past Orders</h3>
+    <div id="pastList">
+      <div class="empty-state">Loading history…</div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html" class="active"><span class="g">📋</span>Current</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let currentUser = null;
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+requireAuth(async user=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  listenToActiveDelivery();
+  listenToPastOrders();
+  watchForRiderConfirmations(user.uid);
+});
+
+function listenToActiveDelivery(){
+  db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['confirmed','in_progress'])
+    .onSnapshot(snap=>{
+      const section = document.getElementById('activeSection');
+      if(snap.empty){
+        section.style.display = 'none';
+        return;
+      }
+      const doc = snap.docs[0];
+      const o = doc.data();
+      section.style.display = 'block';
+      document.getElementById('activeCard').innerHTML = `
+        <a href="active-delivery.html?id=${doc.id}" style="text-decoration:none; color:inherit;">
+          <div class="order-card">
+            <div class="top-row">
+              <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+              <span class="fare-tag">${fmtPeso(o.fare)}</span>
+            </div>
+            <div class="route">📍 ${o.pickup.address}</div>
+            <div class="route">🎯 ${o.dropoff.address}</div>
+            ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+            <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+            <div class="hint" style="margin-top:10px;">Tap for map &amp; directions →</div>
+          </div>
+        </a>
+      `;
+    });
+}
+
+function listenToPastOrders(){
+  db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['completed','cancelled'])
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('pastList');
+      if(snap.empty){
+        list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No completed deliveries yet.</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      snap.forEach(doc=>{
+        const o = doc.data();
+        const card = document.createElement('div');
+        card.className = 'order-card';
+        card.innerHTML = `
+          <div class="top-row">
+            <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+            <span class="fare-tag">${fmtPeso(o.fare)}</span>
+          </div>
+          <div class="route">📍 ${o.pickup.address}</div>
+          <div class="route">🎯 ${o.dropoff.address}</div>
+          <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+        `;
+        list.appendChild(card);
+      });
+    }, err=>{
+      document.getElementById('pastList').innerHTML =
+        `<div class="empty-state">Couldn't load history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>

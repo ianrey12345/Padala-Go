@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Active Delivery · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  #map{height:320px;}
+  .stage-banner{
+    background:var(--paper); border-radius:14px; padding:14px 16px; margin-top:14px;
+    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
+  }
+  .stage-banner .glyph{font-size:22px;}
+  .stage-banner .txt{font-size:13.5px; font-weight:600; color:var(--teal-dark);}
+  .stage-banner .sub{font-size:12px; color:#8A8178; margin-top:1px;}
+  .eta-pill{
+    display:inline-block; background:var(--cream); color:var(--teal-dark);
+    font-family:'Space Mono'; font-size:12.5px; padding:4px 10px; border-radius:20px; margin-top:8px;
+  }
+  .map-legend{display:flex; gap:16px; font-size:12.5px; margin-top:10px; color:#586866;}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar plain">
+    <a href="orders.html" class="back">← Deliveries</a>
+    <h1 style="color:#fff; font-size:19px;">Active Delivery</h1>
+  </div>
+
+  <div class="content">
+    <div id="map"></div>
+    <div class="map-legend">
+      <span><span class="pin-dot" style="background:#F0A93A;"></span>You</span>
+      <span><span class="pin-dot" style="background:#2F8F5B;"></span>Pickup</span>
+      <span>🏁 Drop-off</span>
+    </div>
+    <div class="eta-pill" id="etaPill" style="display:none;"></div>
+    <div class="hint">Straight-line distance shown — actual road distance may differ.</div>
+
+    <a href="#" class="btn btn-primary" id="navigateBtn" style="margin-top:12px; display:none; text-decoration:none;">
+      🧭 Open Turn-by-Turn Directions
+    </a>
+
+    <div class="stage-banner" id="stageBanner">
+      <div class="glyph">📍</div>
+      <div>
+        <div class="txt" id="stageText">Loading order…</div>
+        <div class="sub" id="stageSub"></div>
+      </div>
+    </div>
+
+    <div class="order-card" style="margin-top:14px;" id="orderCard"></div>
+
+    <button type="button" class="btn btn-amber" id="actionBtn" style="margin-top:16px; display:none;"></button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const orderId = params.get('id');
+let currentUser = null;
+let orderData = null;
+let map, riderMarker, pickupMarker, dropoffMarker, straightLine, watchId;
+
+// Assumed average speed for a motorbike in city/mixed traffic, used only
+// to estimate ETA from straight-line distance (no Directions API needed).
+const ASSUMED_SPEED_KMH = 25;
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+requireAuth(user=>{
+  currentUser = user;
+  if(!orderId){ window.location.href = "orders.html"; return; }
+  listenToOrder();
+});
+
+function initMap(){
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 14.6760, lng: 121.0437 },
+    zoom: 13,
+    disableDefaultUI: true,
+    zoomControl: true,
+  });
+
+  if(navigator.geolocation){
+    watchId = navigator.geolocation.watchPosition(pos=>{
+      const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      updateRiderMarker(riderPos);
+      if(orderData) updateRouteVisuals();
+    }, ()=>{}, { enableHighAccuracy: true });
+  }
+}
+
+function updateRiderMarker(pos){
+  if(!riderMarker){
+    riderMarker = new google.maps.Marker({
+      position: pos, map,
+      icon: {
+        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+        scale: 5, fillColor: '#F0A93A', fillOpacity: 1,
+        strokeColor: '#082F2B', strokeWeight: 1.5
+      },
+      title: 'You'
+    });
+  } else {
+    riderMarker.setPosition(pos);
+  }
+}
+
+function currentDestination(){
+  // Before picked up: head to pickup. After picked up: head to drop-off.
+  if(orderData.status === 'in_progress'){
+    return orderData.dropoff;
+  }
+  return orderData.pickup;
+}
+
+function ensurePickupDropoffMarkers(){
+  if(!pickupMarker){
+    pickupMarker = new google.maps.Marker({
+      position: { lat: orderData.pickup.lat, lng: orderData.pickup.lng }, map,
+      icon:{ path: google.maps.SymbolPath.CIRCLE, scale:9,
+        fillColor: '#2F8F5B', fillOpacity:1, strokeColor:'#fff', strokeWeight:2 },
+      title: 'Pickup: ' + orderData.pickup.address
+    });
+  }
+  if(!dropoffMarker){
+    dropoffMarker = new google.maps.Marker({
+      position: { lat: orderData.dropoff.lat, lng: orderData.dropoff.lng }, map,
+      label: { text: '🏁', fontSize: '16px' },
+      title: 'Drop-off: ' + orderData.dropoff.address
+    });
+  }
+}
+
+function updateRouteVisuals(){
+  const dest = currentDestination();
+  if(!dest) return;
+
+  ensurePickupDropoffMarkers();
+
+  const bounds = new google.maps.LatLngBounds();
+  bounds.extend({ lat: orderData.pickup.lat, lng: orderData.pickup.lng });
+  bounds.extend({ lat: orderData.dropoff.lat, lng: orderData.dropoff.lng });
+
+  if(riderMarker){
+    const riderPos = riderMarker.getPosition().toJSON();
+    bounds.extend(riderPos);
+
+    // Straight line between rider and the CURRENT active point (pickup, then drop-off)
+    if(straightLine) straightLine.setMap(null);
+    straightLine = new google.maps.Polyline({
+      path: [riderPos, { lat: dest.lat, lng: dest.lng }],
+      geodesic: true,
+      strokeColor: '#0C4A45',
+      strokeOpacity: 0.7,
+      strokeWeight: 3,
+      icons: [{ icon:{ path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '14px' }],
+      map
+    });
+
+    const km = distanceKmBetween(riderPos, { lat: dest.lat, lng: dest.lng });
+    const mins = Math.max(1, Math.round((km / ASSUMED_SPEED_KMH) * 60));
+    const pill = document.getElementById('etaPill');
+    pill.style.display = 'inline-block';
+    pill.textContent = `${km.toFixed(1)} km · ~${mins} min away`;
+  }
+
+  map.fitBounds(bounds, 60);
+  updateNavigateLink(dest);
+}
+
+function updateNavigateLink(dest){
+  const navBtn = document.getElementById('navigateBtn');
+  const destParam = `${dest.lat},${dest.lng}`;
+  // Deep-links to the Google Maps app (or maps.google.com in browser) for
+  // real turn-by-turn navigation — this is a free URL, not the paid API.
+  navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${destParam}&travelmode=driving`;
+  navBtn.target = "_blank";
+  navBtn.style.display = 'block';
+}
+
+function listenToOrder(){
+  db.collection('orders').doc(orderId).onSnapshot(doc=>{
+    if(!doc.exists){
+      document.getElementById('stageText').textContent = "Order not found.";
+      return;
+    }
+    orderData = doc.data();
+
+    if(orderData.riderId !== currentUser.uid){
+      document.getElementById('stageText').textContent = "This delivery isn't assigned to you.";
+      return;
+    }
+
+    renderOrderCard();
+    renderStage(doc.ref);
+
+    if(map){
+      updateRouteVisuals();
+    }
+  });
+}
+
+function renderOrderCard(){
+  const o = orderData;
+  document.getElementById('orderCard').innerHTML = `
+    <div class="top-row">
+      <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+      <span class="fare-tag">${fmtPeso(o.fare)}</span>
+    </div>
+    <div class="route">📍 ${o.pickup.address}</div>
+    <div class="route">🎯 ${o.dropoff.address}</div>
+    ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+  `;
+}
+
+function renderStage(orderRef){
+  const o = orderData;
+  const stageText = document.getElementById('stageText');
+  const stageSub = document.getElementById('stageSub');
+  const actionBtn = document.getElementById('actionBtn');
+  actionBtn.style.display = 'block';
+  actionBtn.onclick = null;
+
+  if(o.status === 'confirmed' && !o.arrivedAtPickup){
+    stageText.textContent = "Heading to pickup point";
+    stageSub.textContent = "Head toward the teal pin — that's the pickup location.";
+    actionBtn.textContent = "I've Arrived at Pickup";
+    actionBtn.className = "btn btn-amber";
+    actionBtn.onclick = ()=> orderRef.update({
+      arrivedAtPickup: true,
+      arrivedAtPickupAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else if(o.status === 'confirmed' && o.arrivedAtPickup){
+    stageText.textContent = "Arrived at pickup point";
+    stageSub.textContent = "Customer has been notified. Once you have the item, mark it picked up.";
+    actionBtn.textContent = "Let's Go to Destination";
+    actionBtn.className = "btn btn-primary";
+    actionBtn.onclick = ()=> orderRef.update({ status: 'in_progress' });
+  } else if(o.status === 'in_progress'){
+    stageText.textContent = "On the way to drop-off";
+    stageSub.textContent = "Head toward the teal pin — that's the drop-off location.";
+    actionBtn.textContent = "Mark Delivered";
+    actionBtn.className = "btn btn-amber";
+    actionBtn.onclick = ()=> orderRef.update({ status: 'completed' });
+  } else if(o.status === 'completed'){
+    stageText.textContent = "Delivery completed 🎉";
+    stageSub.textContent = "Nice work!";
+    actionBtn.style.display = 'none';
+  }
+}
+
+window.addEventListener('beforeunload', ()=>{
+  if(watchId) navigator.geolocation.clearWatch(watchId);
+});
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCJ2QThH1zXt-7U5HlbvSk2f2S33IsrHic&callback=initMap" async defer></script>
+</body>
+</html>
