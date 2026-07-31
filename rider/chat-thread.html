@@ -29,7 +29,7 @@
 <body>
 <div class="chat-shell">
   <div class="chat-topbar">
-    <a href="chat.html" class="back">←</a>
+    <a href="chat.html" class="back" id="backLink">←</a>
     <div>
       <div class="who" id="chatTitle">Chat</div>
       <div class="sub" id="chatSubtitle"></div>
@@ -128,6 +128,16 @@ function escapeHtml(str){
   div.textContent = str;
   return div.innerHTML;
 }
+
+// Return to whatever page linked here, instead of always jumping to the
+// generic chat list — only falls back to chat.html if there's nowhere
+// in history to go back to.
+document.getElementById('backLink').addEventListener('click', function(e){
+  if(window.history.length > 1){
+    e.preventDefault();
+    window.history.back();
+  }
+});
 
 document.getElementById('composerForm').addEventListener('submit', async (e)=>{
   e.preventDefault();

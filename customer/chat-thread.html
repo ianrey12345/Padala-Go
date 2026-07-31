@@ -28,7 +28,7 @@
 <body>
 <div class="chat-shell">
   <div class="chat-topbar">
-    <a href="chat.html" class="back">←</a>
+    <a href="chat.html" class="back" id="backLink">←</a>
     <div>
       <div class="who" id="riderNameHeader">Rider</div>
       <div class="sub" id="riderVehicleHeader"></div>
@@ -120,6 +120,17 @@ function escapeHtml(str){
   div.textContent = str;
   return div.innerHTML;
 }
+
+// If we arrived here from an in-app page (e.g. the "Chat with Rider"
+// button on order-status.html), go back to it. Only fall back to the
+// generic chat.html link when there's nowhere in history to return to
+// (e.g. this page was opened directly / from a bookmark).
+document.getElementById('backLink').addEventListener('click', function(e){
+  if(window.history.length > 1){
+    e.preventDefault();
+    window.history.back();
+  }
+});
 
 document.getElementById('composerForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
