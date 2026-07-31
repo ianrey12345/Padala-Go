@@ -125,6 +125,7 @@ requireAuth(async user=>{
 
   initMap();
   startRiderLiveLocation();
+  watchMyActiveDelivery(user.uid);
   listenToPendingOrders();
   watchForRiderConfirmations(user.uid);
   watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
@@ -202,6 +203,23 @@ function broadcastRiderProfileLocation(pos){
 function clearMarkers(){
   markers.forEach(m=>map.removeLayer(m));
   markers = [];
+}
+
+/* Riders can only have one delivery in progress at a time — this keeps
+   them from stacking up multiple pending confirmations. While an order
+   they're on is 'confirmed' or 'in_progress', the browse list is replaced
+   with a banner pointing at Current. Cleared automatically the moment
+   that order becomes 'completed' (or 'cancelled'). */
+let myActiveOrderId = null;
+
+function watchMyActiveDelivery(riderId){
+  db.collection('orders')
+    .where('riderId','==', riderId)
+    .where('status','in', ['confirmed','in_progress'])
+    .onSnapshot(snap=>{
+      myActiveOrderId = snap.empty ? null : snap.docs[0].id;
+      renderOrdersList();
+    });
 }
 
 let isFirstOrdersSnapshot = true;
@@ -296,6 +314,25 @@ function updateCategoryCounts(){
 function renderOrdersList(){
   clearMarkers();
   const list = document.getElementById('ordersList');
+  const categoryFilters = document.getElementById('categoryFilters');
+  const zonesSection = document.getElementById('zonesSection');
+
+  if(myActiveOrderId){
+    categoryFilters.style.display = 'none';
+    zonesSection.style.display = 'none';
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="glyph">🛵</div>
+        You have an active delivery — complete it before taking a new one.
+        <div style="margin-top:14px;">
+          <a href="current.html" class="btn btn-primary" style="width:auto; display:inline-flex; padding:11px 24px; text-decoration:none;">View Active Delivery</a>
+        </div>
+      </div>`;
+    return;
+  }
+  categoryFilters.style.display = '';
+  // zonesSection's own display is managed by renderPlaceFilters(), which
+  // reruns on every pending-orders snapshot — leave it alone here.
 
   let filtered = allPendingOrders.filter(doc=>{
     const o = doc.data();

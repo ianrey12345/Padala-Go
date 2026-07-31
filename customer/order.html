@@ -7,14 +7,18 @@
 <link rel="stylesheet" href="../shared/styles.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  .search-wrap{ position:relative; margin-bottom:10px; }
+  /* z-index:2 gives this its own stacking context so the dropdown's
+     z-index below actually wins over Leaflet's map panes/controls,
+     which otherwise render on top (Leaflet's control layer can reach
+     z-index:1000). */
+  .search-wrap{ position:relative; margin-bottom:10px; z-index:2; }
   .search-wrap input{
     width:100%; padding:13px 14px; border-radius:12px; border:1.5px solid var(--line);
     background:var(--paper); font-size:14px; font-family:'Inter'; color:var(--ink);
   }
   .search-wrap input:focus{ outline:none; border-color:var(--teal); }
   .search-results{
-    position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:50;
+    position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:1000;
     background:var(--paper); border:1.5px solid var(--line); border-radius:14px;
     box-shadow:var(--shadow); max-height:240px; overflow-y:auto;
   }

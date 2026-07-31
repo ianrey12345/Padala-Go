@@ -120,6 +120,10 @@ const orderId = params.get('id');
 let currentUser = null;
 let orderData = null;
 let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
+// Set if the rider already has a confirmed/in_progress delivery on a
+// *different* order — blocks the Request button so they can't stack a
+// second delivery on top of one they haven't completed yet.
+let blockingOrder = null;
 const ASSUMED_SPEED_KMH = 25; // fallback only, used if the routing service is unreachable
 
 /* Lightweight route cache, same pattern as the rider Map tab — avoids
@@ -354,6 +358,12 @@ async function loadOrder(){
 
   if(map) updateVisuals();
 
+  const activeSnap = await db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['confirmed','in_progress'])
+    .get();
+  blockingOrder = activeSnap.docs.find(d => d.id !== orderId) || null;
+
   const reqDoc = await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).get();
   const requested = reqDoc.exists && reqDoc.data().status !== 'declined';
   setRequestButton(requested);
@@ -361,6 +371,12 @@ async function loadOrder(){
 
 function setRequestButton(requested){
   const btn = document.getElementById('requestBtn');
+  if(blockingOrder){
+    btn.textContent = 'Complete your current delivery first';
+    btn.disabled = true;
+    btn.className = 'btn btn-outline';
+    return;
+  }
   if(requested){
     btn.textContent = 'Requested ✓';
     btn.disabled = true;
