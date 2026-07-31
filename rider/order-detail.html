@@ -119,10 +119,57 @@ const params = new URLSearchParams(window.location.search);
 const orderId = params.get('id');
 let currentUser = null;
 let orderData = null;
-let map, riderMarker, pickupMarker, dropoffMarker, straightLine, watchId;
-const ASSUMED_SPEED_KMH = 25;
+let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
+const ASSUMED_SPEED_KMH = 25; // fallback only, used if the routing service is unreachable
+
+/* Lightweight route cache, same pattern as the rider Map tab — avoids
+   hitting the shared OSRM demo server on every GPS tick. */
+let currentRoute = null;
+let lastRouteFetchAt = 0;
+const ROUTE_REFRESH_MS = 45000;
+const ROUTE_DEVIATION_KM = 0.25;
+
+async function ensureRoute(origin, dest){
+  const now = Date.now();
+  if(currentRoute){
+    const { offRouteKm } = projectOntoRoute(currentRoute.coords, origin);
+    const stale = now - lastRouteFetchAt > ROUTE_REFRESH_MS;
+    if(offRouteKm < ROUTE_DEVIATION_KM && !stale) return currentRoute;
+  }
+  try{
+    const r = await fetchRoadRoute(origin, dest);
+    currentRoute = { coords: r.coords, distanceKm: r.distanceKm, durationMin: r.durationMin };
+    lastRouteFetchAt = now;
+  } catch(err){
+    console.warn('Routing service unavailable, falling back to a straight line:', err);
+    if(!currentRoute){
+      const km = distanceKmBetween(origin, dest);
+      currentRoute = { coords: [[origin.lat, origin.lng], [dest.lat, dest.lng]], distanceKm: km, durationMin: (km / ASSUMED_SPEED_KMH) * 60 };
+    }
+  }
+  return currentRoute;
+}
 
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+/* Title = the specific landmark/place (e.g. "7-Eleven Kamias"), small text
+   below = just street + municipality — no zip code, no province, no country,
+   to keep it scannable. `landmark`/`street`/`municipality` are captured by
+   order.html's reverseGeocode() at order-creation time; older orders made
+   before that existed only have the old flat `address` string, so we fall
+   back to a best-effort split of that instead. */
+function formatPoint(point, titleElId, detailElId){
+  const titleEl = document.getElementById(titleElId);
+  const detailEl = document.getElementById(detailElId);
+  if(point.landmark){
+    titleEl.textContent = point.landmark;
+    detailEl.textContent = [point.street, point.municipality].filter(Boolean).join(', ');
+  } else {
+    const [title, ...rest] = point.address.split(',');
+    titleEl.textContent = title.trim();
+    detailEl.textContent = rest.slice(0, 2).join(',').trim();
+  }
+}
 
 /* Same live ticking countdown pattern as active-delivery.html and the
    customer's order-status page — recalibrated on every fresh GPS fix. */
@@ -239,22 +286,37 @@ function updateVisuals(){
 
   if(riderMarker){
     const riderPos = riderMarker.getLatLng();
+    const riderPt = { lat: riderPos.lat, lng: riderPos.lng };
     boundsPoints.push([riderPos.lat, riderPos.lng]);
 
-    if(straightLine) map.removeLayer(straightLine);
-    straightLine = L.polyline([riderPos, [o.pickup.lat, o.pickup.lng]], {
-      color: '#0C4A45', weight: 3, opacity: 0.7, dashArray: '4, 8'
-    }).addTo(map);
-
-    const kmToPickup = distanceKmBetween({ lat: riderPos.lat, lng: riderPos.lng }, { lat: o.pickup.lat, lng: o.pickup.lng });
-    const mins = Math.max(1, Math.round((kmToPickup / ASSUMED_SPEED_KMH) * 60));
-    document.getElementById('statToAddress').textContent = kmToPickup.toFixed(1) + ' km';
-    // Recalibrate the countdown deadline against this fresh location fix.
-    etaDeadlineMs = Date.now() + mins * 60000;
-    startEtaCountdown();
+    updateRoute(riderPt, { lat: o.pickup.lat, lng: o.pickup.lng });
   }
 
   map.fitBounds(boundsPoints, { padding: [70, 70] });
+}
+
+async function updateRoute(riderPt, pickupPt){
+  const route = await ensureRoute(riderPt, pickupPt);
+  const { index, point } = projectOntoRoute(route.coords, riderPt);
+  const remaining = [point].concat(route.coords.slice(index + 1));
+  const traveled = route.coords.slice(0, index + 1).concat([point]);
+
+  if(routeLine) map.removeLayer(routeLine);
+  if(progressLine) map.removeLayer(progressLine);
+  // Real road route in blue, with the distance already covered overlaid
+  // in amber — same treatment as the rider's live Map tab.
+  routeLine = L.polyline(remaining, { color: '#4285F4', weight: 5, opacity: 0.85 }).addTo(map);
+  progressLine = L.polyline(traveled, { color: '#F0A93A', weight: 5, opacity: 0.95 }).addTo(map);
+
+  const remainingKm = routeLengthKm(remaining);
+  // Pace derived from OSRM's own duration for this route (accounts for
+  // road type) rather than a flat assumed speed — keeps this in line with
+  // real-world ETAs like Google Maps instead of running consistently high.
+  const paceMinPerKm = route.distanceKm > 0 ? route.durationMin / route.distanceKm : (60 / ASSUMED_SPEED_KMH);
+  const mins = Math.max(1, Math.round(remainingKm * paceMinPerKm));
+  document.getElementById('statToAddress').textContent = remainingKm.toFixed(1) + ' km';
+  etaDeadlineMs = Date.now() + mins * 60000;
+  startEtaCountdown();
 }
 
 async function loadOrder(){
@@ -269,13 +331,8 @@ async function loadOrder(){
   document.getElementById('orderSubtitle').textContent = `Padala Go, ${serviceLabel(o.serviceType)}`;
   document.getElementById('fareBig').textContent = fmtPeso(o.fare);
 
-  const [pTitle, ...pRest] = o.pickup.address.split(',');
-  document.getElementById('pickupTitle').textContent = pTitle.trim();
-  document.getElementById('pickupDetail').textContent = pRest.join(',').trim();
-
-  const [dTitle, ...dRest] = o.dropoff.address.split(',');
-  document.getElementById('dropoffTitle').textContent = dTitle.trim();
-  document.getElementById('dropoffDetail').textContent = dRest.join(',').trim();
+  formatPoint(o.pickup, 'pickupTitle', 'pickupDetail');
+  formatPoint(o.dropoff, 'dropoffTitle', 'dropoffDetail');
 
   document.getElementById('statDistance').textContent = o.distanceKm + ' km';
 
