@@ -6,6 +6,25 @@
 <title>New Delivery · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  .search-wrap{ position:relative; margin-bottom:10px; }
+  .search-wrap input{
+    width:100%; padding:13px 14px; border-radius:12px; border:1.5px solid var(--line);
+    background:var(--paper); font-size:14px; font-family:'Inter'; color:var(--ink);
+  }
+  .search-wrap input:focus{ outline:none; border-color:var(--teal); }
+  .search-results{
+    position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:50;
+    background:var(--paper); border:1.5px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow); max-height:240px; overflow-y:auto;
+  }
+  .search-result-row{ padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .search-result-row:last-child{ border-bottom:none; }
+  .search-result-row:hover, .search-result-row:active{ background:var(--cream); }
+  .search-result-row .r-title{ font-size:13.5px; font-weight:600; color:var(--ink); }
+  .search-result-row .r-sub{ font-size:12px; color:#8A8178; margin-top:2px; }
+  .search-note{ padding:12px 14px; font-size:13px; color:#8A8178; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -19,6 +38,11 @@
     <div style="display:flex; gap:8px; margin-bottom:10px;">
       <button type="button" class="btn btn-sm" id="modePickupBtn" style="flex:1; background:var(--teal); color:#fff;">📍 Set Pickup</button>
       <button type="button" class="btn btn-sm" id="modeDropoffBtn" style="flex:1; background:var(--line); color:var(--ink);">🎯 Set Drop-off</button>
+    </div>
+
+    <div class="search-wrap" id="searchWrap">
+      <input type="text" id="searchInput" placeholder="Search a place for pickup…" autocomplete="off">
+      <div id="searchResults" class="search-results" style="display:none;"></div>
     </div>
 
     <button type="button" class="btn btn-outline btn-sm" id="useLocationBtn" style="width:100%; margin-bottom:10px;" disabled>
@@ -88,6 +112,10 @@ const modePickupBtn = document.getElementById('modePickupBtn');
 const modeDropoffBtn = document.getElementById('modeDropoffBtn');
 const mapHint = document.getElementById('mapHint');
 const placeOrderBtn = document.getElementById('placeOrderBtn');
+const searchInput = document.getElementById('searchInput');
+const searchResultsEl = document.getElementById('searchResults');
+let searchDebounceTimer = null;
+let searchAbortController = null;
 
 function setMode(mode){
   activeMode = mode;
@@ -98,6 +126,9 @@ function setMode(mode){
   mapHint.textContent = mode === 'pickup'
     ? 'Tap the map to set your pickup point.'
     : 'Tap the map to set your drop-off point.';
+  searchInput.placeholder = mode === 'pickup'
+    ? 'Search a place for pickup…'
+    : 'Search a place for drop-off…';
 }
 modePickupBtn.addEventListener('click', ()=>setMode('pickup'));
 modeDropoffBtn.addEventListener('click', ()=>setMode('dropoff'));
@@ -187,7 +218,7 @@ function startLiveLocation(){
   );
 }
 
-function placePoint(kind, point){
+function placePoint(kind, point, precomputedGeo){
   const icon = kind === 'pickup' ? pickupIcon : dropoffIcon;
 
   if(kind === 'pickup'){
@@ -200,23 +231,38 @@ function placePoint(kind, point){
     dropoffMarker.on('dragend', ()=> onMarkerMoved('dropoff', dropoffMarker));
   }
 
-  reverseGeocode(point, (address, municipality)=>{
-    const full = { ...point, address, municipality };
+  const apply = (geo)=>{
+    const full = { lat: point.lat, lng: point.lng, ...geo };
     if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
-    updatePointRow(kind, address);
+    updatePointRow(kind, geo.address);
     recalcFare();
-  });
+  };
+
+  // A search result already carries its own address details, so there's
+  // no need to round-trip to Nominatim's reverse endpoint again.
+  if(precomputedGeo){ apply(precomputedGeo); } else { reverseGeocode(point, apply); }
 }
 
 function onMarkerMoved(kind, marker){
   const pos = marker.getLatLng();
   const point = { lat: pos.lat, lng: pos.lng };
-  reverseGeocode(point, (address, municipality)=>{
-    const full = { ...point, address, municipality };
+  reverseGeocode(point, (geo)=>{
+    const full = { ...point, ...geo };
     if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
-    updatePointRow(kind, address);
+    updatePointRow(kind, geo.address);
     recalcFare();
   });
+}
+
+/* Picks the most specific "landmark" name available from a Nominatim
+   address object — a named POI (shop, amenity, building) if the point
+   landed on one, otherwise the house number + street, otherwise falls
+   back to the first segment of the full display name. Shared by both
+   reverse geocoding (tap/drag on map) and forward search (typed query). */
+function extractLandmark(a, displayName){
+  return a.amenity || a.shop || a.building || a.leisure || a.tourism || a.office || a.name
+    || (a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road)
+    || (displayName ? displayName.split(',')[0].trim() : '');
 }
 
 async function reverseGeocode(point, cb){
@@ -232,12 +278,19 @@ async function reverseGeocode(point, cb){
       // Philippine addresses vary in which field holds the municipality/city name —
       // try the common ones in order of specificity.
       const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
-      cb(data.display_name, municipality);
+      cb({
+        address: data.display_name,
+        municipality,
+        landmark: extractLandmark(a, data.display_name),
+        street: a.road || ''
+      });
     } else {
-      cb(`${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, '');
+      const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+      cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
     }
   } catch(err){
-    cb(`${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, '');
+    const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+    cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
   }
 }
 
@@ -245,6 +298,101 @@ function updatePointRow(kind, address){
   const el = document.getElementById(kind === 'pickup' ? 'pickupAddr' : 'dropoffAddr');
   el.textContent = address;
   el.classList.remove('placeholder');
+}
+
+/* ---------------------------------------------------------
+   Search bar — lets the customer type an address or place name
+   instead of only tapping the map. Uses Nominatim's free forward
+   search, biased toward the Philippines and the current map view
+   (not strictly limited to it, so a specific address elsewhere
+   can still be found). Applies to whichever point — pickup or
+   drop-off — is currently active via the mode toggle above.
+   --------------------------------------------------------- */
+searchInput.addEventListener('input', ()=>{
+  clearTimeout(searchDebounceTimer);
+  const q = searchInput.value.trim();
+  if(q.length < 3){
+    searchResultsEl.style.display = 'none';
+    searchResultsEl.innerHTML = '';
+    return;
+  }
+  searchDebounceTimer = setTimeout(()=> runSearch(q), 400);
+});
+
+searchInput.addEventListener('focus', ()=>{
+  if(searchResultsEl.innerHTML) searchResultsEl.style.display = 'block';
+});
+
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('#searchWrap')) searchResultsEl.style.display = 'none';
+});
+
+async function runSearch(query){
+  searchResultsEl.style.display = 'block';
+  searchResultsEl.innerHTML = `<div class="search-note">Searching…</div>`;
+
+  if(searchAbortController) searchAbortController.abort();
+  searchAbortController = new AbortController();
+
+  try{
+    const center = map.getCenter();
+    // viewbox biases results toward the current map area without strictly
+    // limiting to it (bounded=0) — lets a specific faraway address still
+    // be found, while keeping nearby places at the top.
+    const viewbox = `${center.lng - 0.5},${center.lat + 0.5},${center.lng + 0.5},${center.lat - 0.5}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}` +
+      `&addressdetails=1&limit=6&countrycodes=ph&viewbox=${viewbox}&bounded=0`;
+    const res = await fetch(url, { signal: searchAbortController.signal });
+    const results = await res.json();
+
+    if(!results.length){
+      searchResultsEl.innerHTML = `<div class="search-note">No results found.</div>`;
+      return;
+    }
+
+    searchResultsEl.innerHTML = '';
+    results.forEach(r=>{
+      const a = r.address || {};
+      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+      const row = document.createElement('div');
+      row.className = 'search-result-row';
+      const titleEl = document.createElement('div');
+      titleEl.className = 'r-title';
+      titleEl.textContent = extractLandmark(a, r.display_name);
+      const subEl = document.createElement('div');
+      subEl.className = 'r-sub';
+      subEl.textContent = [a.road, municipality].filter(Boolean).join(', ') || r.display_name;
+      row.appendChild(titleEl);
+      row.appendChild(subEl);
+      row.addEventListener('click', ()=> selectSearchResult(r));
+      searchResultsEl.appendChild(row);
+    });
+  } catch(err){
+    if(err.name === 'AbortError') return;
+    searchResultsEl.innerHTML = `<div class="search-note">Search failed — try again.</div>`;
+  }
+}
+
+function selectSearchResult(r){
+  const point = { lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+  const a = r.address || {};
+  const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+
+  placePoint(activeMode, point, {
+    address: r.display_name,
+    municipality,
+    landmark: extractLandmark(a, r.display_name),
+    street: a.road || ''
+  });
+
+  searchInput.value = '';
+  searchResultsEl.style.display = 'none';
+  searchResultsEl.innerHTML = '';
+  map.setView([point.lat, point.lng], 16);
+
+  if(activeMode === 'pickup' && !dropoffPoint){
+    setMode('dropoff');
+  }
 }
 
 function recalcFare(){
