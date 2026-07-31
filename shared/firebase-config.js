@@ -48,6 +48,58 @@ function distanceKmBetween(a, b){
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
 }
 
+/* ---------------------------------------------------------
+   Real road routing via OSRM's free public routing server —
+   no API key required. Shared by the rider's Map tab (live
+   tracking) and the rider's order-preview page (ETA to pickup
+   before requesting a delivery), so both show a real road path
+   and a real road-based ETA instead of a straight-line guess.
+   Fair-use note: this is a shared community demo server, not a
+   production SLA — keep calls infrequent (see ROUTE_REFRESH_MS
+   pattern in the pages that use this).
+   --------------------------------------------------------- */
+async function fetchRoadRoute(origin, dest){
+  const url = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(!data.routes || !data.routes.length) throw new Error('No route found');
+  const route = data.routes[0];
+  const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]); // GeoJSON is [lng,lat]
+  return { coords, distanceKm: route.distance / 1000, durationMin: route.duration / 60 };
+}
+
+/* Closest point on a single segment to a {lat,lng} point — treats the
+   small local area as planar, which is accurate enough at city scale. */
+function closestPointOnSegment(p1, p2, p){
+  const [y1, x1] = p1, [y2, x2] = p2;
+  const px = p.lng, py = p.lat;
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx*dx + dy*dy;
+  let t = lenSq === 0 ? 0 : ((px - x1)*dx + (py - y1)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return [y1 + t*dy, x1 + t*dx];
+}
+
+/* Projects a live position onto a route polyline — lets callers draw a
+   genuine "distance covered" overlay instead of a straight-line guess. */
+function projectOntoRoute(coords, pos){
+  let bestDistKm = Infinity, bestIdx = 0, bestPoint = coords[0];
+  for(let i=0; i<coords.length-1; i++){
+    const cand = closestPointOnSegment(coords[i], coords[i+1], pos);
+    const d = distanceKmBetween({ lat: cand[0], lng: cand[1] }, pos);
+    if(d < bestDistKm){ bestDistKm = d; bestIdx = i; bestPoint = cand; }
+  }
+  return { index: bestIdx, point: bestPoint, offRouteKm: bestDistKm };
+}
+
+function routeLengthKm(coords){
+  let total = 0;
+  for(let i=0; i<coords.length-1; i++){
+    total += distanceKmBetween({ lat: coords[i][0], lng: coords[i][1] }, { lat: coords[i+1][0], lng: coords[i+1][1] });
+  }
+  return total;
+}
+
 function requireAuth(onReady){
   auth.onAuthStateChanged(user=>{
     if(!user){
