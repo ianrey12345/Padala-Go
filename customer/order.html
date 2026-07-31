@@ -3,90 +3,93 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>New Delivery · Padala Go</title>
+<title>Available Deliveries · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  .search-wrap{ position:relative; margin-bottom:10px; }
-  .search-wrap input{
-    width:100%; padding:13px 14px; border-radius:12px; border:1.5px solid var(--line);
-    background:var(--paper); font-size:14px; font-family:'Inter'; color:var(--ink);
+  .menu-section{ background:var(--paper); border-radius:14px; overflow:hidden; box-shadow:var(--shadow); margin-bottom:16px; }
+  .menu-section-title{
+    padding:10px 16px; font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.07em; color:#8A8178; background:var(--cream);
   }
-  .search-wrap input:focus{ outline:none; border-color:var(--teal); }
-  .search-results{
-    position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:50;
-    background:var(--paper); border:1.5px solid var(--line); border-radius:14px;
-    box-shadow:var(--shadow); max-height:240px; overflow-y:auto;
+  .menu-row{
+    display:flex; justify-content:space-between; align-items:center; padding:14px 16px;
+    border-bottom:1px solid var(--line); border-left:4px solid transparent;
+    cursor:pointer; user-select:none;
   }
-  .search-result-row{ padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--line); }
-  .search-result-row:last-child{ border-bottom:none; }
-  .search-result-row:hover, .search-result-row:active{ background:var(--cream); }
-  .search-result-row .r-title{ font-size:13.5px; font-weight:600; color:var(--ink); }
-  .search-result-row .r-sub{ font-size:12px; color:#8A8178; margin-top:2px; }
-  .search-note{ padding:12px 14px; font-size:13px; color:#8A8178; }
+  .menu-row:last-child{ border-bottom:none; }
+  .menu-row.active{ border-left-color:var(--amber); background:#FFF9EF; }
+  .menu-row .row-label{ font-size:14px; color:var(--ink); font-weight:500; }
+  .menu-row .row-right{ display:flex; align-items:center; gap:8px; }
+  .menu-row .row-count{ color:var(--teal); font-weight:700; font-family:'Space Mono'; font-size:13px; }
+  .menu-row .chevron{ color:#C7BFB2; font-size:15px; }
+  .location-pill{
+    display:inline-flex; align-items:center; gap:5px; background:rgba(255,255,255,0.15);
+    color:#fff; font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; margin-top:4px;
+  }
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .wallet-pill{
+    flex-shrink:0; display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.15);
+    color:#fff; font-family:'Space Mono'; font-weight:700; font-size:14px;
+    padding:8px 12px; border-radius:14px; text-decoration:none; margin-top:2px;
+  }
+  .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
+  .wallet-pill .warn{ font-size:13px; }
 </style>
 </head>
 <body>
 <div class="app-shell">
-  <div class="topbar plain">
-    <a href="home.html" class="back">← Back</a>
-    <h1 id="serviceTitle" style="color:#fff; font-size:19px;">Bike Delivery</h1>
+  <div class="topbar">
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Rider</div>
+        <h1 id="greeting">Hi there 👋</h1>
+        <div class="sub">Available deliveries near you</div>
+      </div>
+      <a href="wallet.html" class="wallet-pill" id="walletPill">
+        <span id="walletWarn" class="warn" style="display:none;">⚠️</span>
+        <span id="walletBalanceHeader">₱0</span>
+      </a>
+    </div>
+    <div class="location-pill" id="locationPill" style="display:none;">📍 <span id="locationText">Locating…</span></div>
   </div>
 
   <div class="content">
+    <div id="map" style="margin-bottom:14px;"></div>
 
-    <div style="display:flex; gap:8px; margin-bottom:10px;">
-      <button type="button" class="btn btn-sm" id="modePickupBtn" style="flex:1; background:var(--teal); color:#fff;">📍 Set Pickup</button>
-      <button type="button" class="btn btn-sm" id="modeDropoffBtn" style="flex:1; background:var(--line); color:var(--ink);">🎯 Set Drop-off</button>
-    </div>
-
-    <div class="search-wrap" id="searchWrap">
-      <input type="text" id="searchInput" placeholder="Search a place for pickup…" autocomplete="off">
-      <div id="searchResults" class="search-results" style="display:none;"></div>
-    </div>
-
-    <button type="button" class="btn btn-outline btn-sm" id="useLocationBtn" style="width:100%; margin-bottom:10px;" disabled>
-      🔵 Use My Current Location as Pickup
-    </button>
-
-    <div id="map"></div>
-    <div class="map-legend">
-      <span><span class="pin-dot" style="background:#4285F4;"></span>You (live)</span>
-      <span><span class="pin-dot pickup"></span>Pickup</span>
-      <span><span class="pin-dot dropoff"></span>Drop-off</span>
-    </div>
-    <div class="hint" id="mapHint">Tap the map to set your pickup point.</div>
-    <div class="hint" id="locationHint" style="display:none; color:var(--red);"></div>
-
-    <div class="point-row">
-      <div class="marker pickup"></div>
-      <div class="addr placeholder" id="pickupAddr">No pickup point set</div>
-    </div>
-    <div class="point-row">
-      <div class="marker dropoff"></div>
-      <div class="addr placeholder" id="dropoffAddr">No drop-off point set</div>
-    </div>
-
-    <div class="field" style="margin-top:16px;">
-      <label for="notes">Notes for the rider (landmarks, gate code, item to buy, etc.)</label>
-      <textarea id="notes" placeholder="e.g. Beside 7-Eleven, blue gate. Please buy 2pcs pandesal if padala/pabili."></textarea>
-    </div>
-
-    <div class="meter">
-      <div class="row">
-        <span class="label">Distance</span>
-        <span class="distance" id="distanceReadout">— km</span>
+    <div class="menu-section" id="categoryFilters">
+      <div class="menu-section-title">Categories</div>
+      <div class="menu-row active" data-category="all">
+        <span class="row-label">All</span>
+        <span class="row-right"><span class="row-count" id="count-all">0</span><span class="chevron">›</span></span>
       </div>
-      <div class="row">
-        <span class="label">Total Fare</span>
-        <span class="fare-total"><span class="peso">₱</span><span id="fareReadout">0</span></span>
+      <div class="menu-row" data-category="bike_delivery">
+        <span class="row-label">🏍️ Bike Delivery</span>
+        <span class="row-right"><span class="row-count" id="count-bike_delivery">0</span><span class="chevron">›</span></span>
       </div>
-      <div class="breakdown" id="fareBreakdown">Set both points to calculate fare</div>
+      <div class="menu-row" data-category="padala_pabili">
+        <span class="row-label">🧾 Padala/Pabili</span>
+        <span class="row-right"><span class="row-count" id="count-padala_pabili">0</span><span class="chevron">›</span></span>
+      </div>
     </div>
 
-    <button type="button" class="btn btn-amber" id="placeOrderBtn" style="margin-top:20px;" disabled>
-      Place Order
-    </button>
+    <div class="menu-section" id="zonesSection" style="display:none;">
+      <div class="menu-section-title">Zones</div>
+      <div id="placeFilters"></div>
+    </div>
+
+    <h3 style="font-size:15px; margin-bottom:8px;">Pending Requests</h3>
+    <div id="ordersList">
+      <div class="empty-state">Loading available orders…</div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html" class="active"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html"><span class="g">📋</span>Current</a>
+    <a href="map.html"><span class="g">🗺️</span>Map</a>
+    <a href="menu.html"><span class="g">☰</span>Menu</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
   </div>
 </div>
 
@@ -96,347 +99,275 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="../shared/firebase-config.js"></script>
 <script>
-const params = new URLSearchParams(window.location.search);
-const serviceType = params.get('service') === 'padala_pabili' ? 'padala_pabili' : 'bike_delivery';
-document.getElementById('serviceTitle').textContent = serviceType === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery';
-
 let currentUser = null;
-requireAuth(user=>{ currentUser = user; });
-
 let map;
-let pickupMarker = null, dropoffMarker = null;
-let pickupPoint = null, dropoffPoint = null; // {lat,lng,address}
-let activeMode = 'pickup';
+let markers = [];
+let allPendingOrders = [];      // raw docs from the latest snapshot
+let requestedMap = {};          // orderId -> already requested by me?
+let activeCategory = 'all';
+let activePlace = 'all';
+let riderLocation = null;       // { lat, lng }
 
-const modePickupBtn = document.getElementById('modePickupBtn');
-const modeDropoffBtn = document.getElementById('modeDropoffBtn');
-const mapHint = document.getElementById('mapHint');
-const placeOrderBtn = document.getElementById('placeOrderBtn');
-const searchInput = document.getElementById('searchInput');
-const searchResultsEl = document.getElementById('searchResults');
-let searchDebounceTimer = null;
-let searchAbortController = null;
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
 
-function setMode(mode){
-  activeMode = mode;
-  modePickupBtn.style.background = mode === 'pickup' ? 'var(--teal)' : 'var(--line)';
-  modePickupBtn.style.color = mode === 'pickup' ? '#fff' : 'var(--ink)';
-  modeDropoffBtn.style.background = mode === 'dropoff' ? 'var(--teal)' : 'var(--line)';
-  modeDropoffBtn.style.color = mode === 'dropoff' ? '#fff' : 'var(--ink)';
-  mapHint.textContent = mode === 'pickup'
-    ? 'Tap the map to set your pickup point.'
-    : 'Tap the map to set your drop-off point.';
-  searchInput.placeholder = mode === 'pickup'
-    ? 'Search a place for pickup…'
-    : 'Search a place for drop-off…';
-}
-modePickupBtn.addEventListener('click', ()=>setMode('pickup'));
-modeDropoffBtn.addEventListener('click', ()=>setMode('dropoff'));
+requireAuth(async user=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    // wrong role for this app — send to rider sign-in
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  const firstName = (doc.data().name || "").split(" ")[0];
+  document.getElementById('greeting').textContent = firstName ? `Hi, ${firstName} 👋` : "Hi there 👋";
 
-document.getElementById('useLocationBtn').addEventListener('click', ()=>{
-  if(!liveLocation) return;
-  placePoint('pickup', liveLocation);
-  setMode('dropoff');
-  map.setView([liveLocation.lat, liveLocation.lng], map.getZoom());
+  initMap();
+  startRiderLiveLocation();
+  listenToPendingOrders();
+  watchForRiderConfirmations(user.uid);
+  watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
+    const pill = document.getElementById('walletPill');
+    const warn = document.getElementById('walletWarn');
+    const isLow = bal < LOW_BALANCE_THRESHOLD;
+    pill.classList.toggle('low', isLow);
+    warn.style.display = isLow ? 'inline' : 'none';
+  });
 });
 
-const myLocationIcon = L.divIcon({
+const orderIcon = L.divIcon({
   className: '',
-  html: '<div style="width:16px;height:16px;border-radius:50%;background:#4285F4;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#0C4A45;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
   iconSize: [16,16], iconAnchor: [8,8]
-});
-const pickupIcon = L.divIcon({
-  className: '',
-  html: '<div style="width:20px;height:20px;border-radius:50%;background:#0C4A45;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
-  iconSize: [20,20], iconAnchor: [10,10]
-});
-const dropoffIcon = L.divIcon({
-  className: '',
-  html: '<div style="width:20px;height:20px;border-radius:50%;background:#F0A93A;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
-  iconSize: [20,20], iconAnchor: [10,10]
 });
 
 function initMap(){
-  const defaultCenter = [14.6760, 121.0437]; // Quezon City
-  map = L.map('map', { zoomControl: true }).setView(defaultCenter, 13);
+  map = L.map('map', { zoomControl: true }).setView([14.6760, 121.0437], 12); // Quezon City
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
-  // (Reverse geocoding still uses the free OpenStreetMap Nominatim service — see reverseGeocode())
-
-  startLiveLocation();
-
-  map.on('click', (e)=>{
-    const point = { lat: e.latlng.lat, lng: e.latlng.lng };
-    placePoint(activeMode, point);
-    if(activeMode === 'pickup' && !dropoffPoint){
-      setMode('dropoff');
-    }
-  });
 }
 
-let liveLocation = null;
-let myLocationMarker = null;
-
-function startLiveLocation(){
-  if(!navigator.geolocation){
-    document.getElementById('locationHint').textContent =
-      "This browser doesn't support location — tap the map to set your points manually.";
-    document.getElementById('locationHint').style.display = 'block';
-    return;
-  }
-
-  // watchPosition (rather than a one-time getCurrentPosition) keeps this live —
-  // the "You are here" marker updates in real time as the device moves.
-  // The browser's own permission prompt appears automatically on this call.
+/* Live location for the rider — updates the header pill with a readable
+   municipality/city name (e.g. "You're in Oton") using the free Nominatim
+   reverse-geocoding service, and keeps riderLocation current for
+   nearest-first sorting of the order list. */
+function startRiderLiveLocation(){
+  if(!navigator.geolocation) return;
   navigator.geolocation.watchPosition(
     pos=>{
-      liveLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      document.getElementById('locationHint').style.display = 'none';
-      document.getElementById('useLocationBtn').disabled = false;
-
-      if(!myLocationMarker){
-        myLocationMarker = L.marker([liveLocation.lat, liveLocation.lng], {
-          icon: myLocationIcon, title: 'You are here', zIndexOffset: 999
-        }).addTo(map);
-        map.setView([liveLocation.lat, liveLocation.lng], map.getZoom());
-      } else {
-        myLocationMarker.setLatLng([liveLocation.lat, liveLocation.lng]);
-      }
+      riderLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      if(map) map.panTo([riderLocation.lat, riderLocation.lng]);
+      updateLocationPill(riderLocation);
+      renderOrdersList();
+      broadcastRiderProfileLocation(riderLocation);
     },
-    err=>{
-      const hint = document.getElementById('locationHint');
-      if(err.code === err.PERMISSION_DENIED){
-        hint.textContent = "Location access was denied — you can still tap the map to set your pickup and drop-off points manually.";
-      } else {
-        hint.textContent = "Couldn't get your live location — tap the map to set your points manually.";
-      }
-      hint.style.display = 'block';
-    },
+    ()=>{ /* silently ignore — falls back to newest-first ordering */ },
     { enableHighAccuracy: true }
   );
 }
 
-function placePoint(kind, point, precomputedGeo){
-  const icon = kind === 'pickup' ? pickupIcon : dropoffIcon;
-
-  if(kind === 'pickup'){
-    if(pickupMarker) map.removeLayer(pickupMarker);
-    pickupMarker = L.marker([point.lat, point.lng], { icon, draggable: true }).addTo(map);
-    pickupMarker.on('dragend', ()=> onMarkerMoved('pickup', pickupMarker));
-  } else {
-    if(dropoffMarker) map.removeLayer(dropoffMarker);
-    dropoffMarker = L.marker([point.lat, point.lng], { icon, draggable: true }).addTo(map);
-    dropoffMarker.on('dragend', ()=> onMarkerMoved('dropoff', dropoffMarker));
-  }
-
-  const apply = (geo)=>{
-    const full = { lat: point.lat, lng: point.lng, ...geo };
-    if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
-    updatePointRow(kind, geo.address);
-    recalcFare();
-  };
-
-  // A search result already carries its own address details, so there's
-  // no need to round-trip to Nominatim's reverse endpoint again.
-  if(precomputedGeo){ apply(precomputedGeo); } else { reverseGeocode(point, apply); }
-}
-
-function onMarkerMoved(kind, marker){
-  const pos = marker.getLatLng();
-  const point = { lat: pos.lat, lng: pos.lng };
-  reverseGeocode(point, (geo)=>{
-    const full = { ...point, ...geo };
-    if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
-    updatePointRow(kind, geo.address);
-    recalcFare();
-  });
-}
-
-/* Picks the most specific "landmark" name available from a Nominatim
-   address object — a named POI (shop, amenity, building) if the point
-   landed on one, otherwise the house number + street, otherwise falls
-   back to the first segment of the full display name. Shared by both
-   reverse geocoding (tap/drag on map) and forward search (typed query). */
-function extractLandmark(a, displayName){
-  return a.amenity || a.shop || a.building || a.leisure || a.tourism || a.office || a.name
-    || (a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road)
-    || (displayName ? displayName.split(',')[0].trim() : '');
-}
-
-async function reverseGeocode(point, cb){
-  // Free reverse geocoding via OpenStreetMap's Nominatim — no API key or
-  // billing required. Falls back to raw coordinates only if the request fails.
+let lastGeocodedAt = 0;
+async function updateLocationPill(point){
+  const now = Date.now();
+  if(now - lastGeocodedAt < 30000) return; // avoid hammering Nominatim — refresh at most every 30s
+  lastGeocodedAt = now;
   try{
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${point.lat}&lon=${point.lng}&zoom=18&addressdetails=1`
-    );
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${point.lat}&lon=${point.lng}&zoom=14&addressdetails=1`);
     const data = await res.json();
-    if(data && data.display_name){
-      const a = data.address || {};
-      // Philippine addresses vary in which field holds the municipality/city name —
-      // try the common ones in order of specificity.
-      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
-      cb({
-        address: data.display_name,
-        municipality,
-        landmark: extractLandmark(a, data.display_name),
-        street: a.road || ''
-      });
-    } else {
-      const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
-      cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
+    const a = data.address || {};
+    const place = a.city || a.town || a.municipality || a.village || a.county || '';
+    if(place){
+      document.getElementById('locationText').textContent = `You're in ${place}`;
+      document.getElementById('locationPill').style.display = 'inline-flex';
     }
-  } catch(err){
-    const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
-    cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
-  }
+  } catch(e){ /* ignore */ }
 }
 
-function updatePointRow(kind, address){
-  const el = document.getElementById(kind === 'pickup' ? 'pickupAddr' : 'dropoffAddr');
-  el.textContent = address;
-  el.classList.remove('placeholder');
+let lastProfileLocationWriteAt = 0;
+function broadcastRiderProfileLocation(pos){
+  // Throttled so a rider just browsing pending orders doesn't hammer Firestore.
+  // Lets customers see an ETA for each rider who's requested, before confirming.
+  const now = Date.now();
+  if(now - lastProfileLocationWriteAt < 8000) return;
+  lastProfileLocationWriteAt = now;
+  db.collection('users').doc(currentUser.uid).update({
+    liveLocation: pos,
+    liveLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(()=>{ /* ignore transient failures */ });
 }
 
-/* ---------------------------------------------------------
-   Search bar — lets the customer type an address or place name
-   instead of only tapping the map. Uses Nominatim's free forward
-   search, biased toward the Philippines and the current map view
-   (not strictly limited to it, so a specific address elsewhere
-   can still be found). Applies to whichever point — pickup or
-   drop-off — is currently active via the mode toggle above.
-   --------------------------------------------------------- */
-searchInput.addEventListener('input', ()=>{
-  clearTimeout(searchDebounceTimer);
-  const q = searchInput.value.trim();
-  if(q.length < 3){
-    searchResultsEl.style.display = 'none';
-    searchResultsEl.innerHTML = '';
+function clearMarkers(){
+  markers.forEach(m=>map.removeLayer(m));
+  markers = [];
+}
+
+let isFirstOrdersSnapshot = true;
+
+function listenToPendingOrders(){
+  db.collection('orders')
+    .where('status','==','pending')
+    .orderBy('createdAt','desc')
+    .onSnapshot(async snap=>{
+      // Alert on new incoming orders — but not for the batch that's already
+      // pending the moment the rider opens the app, only ones that arrive
+      // while they're online and watching this screen.
+      if(!isFirstOrdersSnapshot){
+        const newOnes = snap.docChanges().filter(c => c.type === 'added');
+        if(newOnes.length > 0){
+          playRingtone();
+          const msg = newOnes.length === 1
+            ? '🔔 New delivery request available!'
+            : `🔔 ${newOnes.length} new delivery requests available!`;
+          showToast(msg);
+          showBrowserNotification('New Delivery Available', 'A new order just came in — open the app to view it.');
+        }
+      }
+      isFirstOrdersSnapshot = false;
+
+      allPendingOrders = snap.docs;
+      requestedMap = {};
+      await Promise.all(snap.docs.map(async doc=>{
+        const reqDoc = await doc.ref.collection('requests').doc(currentUser.uid).get();
+        requestedMap[doc.id] = reqDoc.exists && reqDoc.data().status !== 'declined';
+      }));
+      renderPlaceFilters();
+      updateCategoryCounts();
+      renderOrdersList();
+    });
+}
+
+function renderPlaceFilters(){
+  const counts = {};
+  allPendingOrders.forEach(doc=>{
+    const m = doc.data().pickup && doc.data().pickup.municipality;
+    if(m) counts[m] = (counts[m] || 0) + 1;
+  });
+
+  const zonesSection = document.getElementById('zonesSection');
+  const container = document.getElementById('placeFilters');
+  const places = Object.keys(counts);
+
+  if(places.length === 0){
+    zonesSection.style.display = 'none';
+    container.innerHTML = '';
     return;
   }
-  searchDebounceTimer = setTimeout(()=> runSearch(q), 400);
-});
+  zonesSection.style.display = 'block';
 
-searchInput.addEventListener('focus', ()=>{
-  if(searchResultsEl.innerHTML) searchResultsEl.style.display = 'block';
-});
+  const rows = [`
+    <div class="menu-row ${activePlace==='all' ? 'active' : ''}" data-place="all">
+      <span class="row-label">📍 All Places</span>
+      <span class="row-right"><span class="row-count">${allPendingOrders.length}</span><span class="chevron">›</span></span>
+    </div>
+  `];
+  places.sort().forEach(p=>{
+    rows.push(`
+      <div class="menu-row ${activePlace===p ? 'active' : ''}" data-place="${p}">
+        <span class="row-label">${p}</span>
+        <span class="row-right"><span class="row-count">${counts[p]}</span><span class="chevron">›</span></span>
+      </div>
+    `);
+  });
+  container.innerHTML = rows.join('');
 
-document.addEventListener('click', (e)=>{
-  if(!e.target.closest('#searchWrap')) searchResultsEl.style.display = 'none';
-});
-
-async function runSearch(query){
-  searchResultsEl.style.display = 'block';
-  searchResultsEl.innerHTML = `<div class="search-note">Searching…</div>`;
-
-  if(searchAbortController) searchAbortController.abort();
-  searchAbortController = new AbortController();
-
-  try{
-    const center = map.getCenter();
-    // viewbox biases results toward the current map area without strictly
-    // limiting to it (bounded=0) — lets a specific faraway address still
-    // be found, while keeping nearby places at the top.
-    const viewbox = `${center.lng - 0.5},${center.lat + 0.5},${center.lng + 0.5},${center.lat - 0.5}`;
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}` +
-      `&addressdetails=1&limit=6&countrycodes=ph&viewbox=${viewbox}&bounded=0`;
-    const res = await fetch(url, { signal: searchAbortController.signal });
-    const results = await res.json();
-
-    if(!results.length){
-      searchResultsEl.innerHTML = `<div class="search-note">No results found.</div>`;
-      return;
-    }
-
-    searchResultsEl.innerHTML = '';
-    results.forEach(r=>{
-      const a = r.address || {};
-      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
-      const row = document.createElement('div');
-      row.className = 'search-result-row';
-      const titleEl = document.createElement('div');
-      titleEl.className = 'r-title';
-      titleEl.textContent = extractLandmark(a, r.display_name);
-      const subEl = document.createElement('div');
-      subEl.className = 'r-sub';
-      subEl.textContent = [a.road, municipality].filter(Boolean).join(', ') || r.display_name;
-      row.appendChild(titleEl);
-      row.appendChild(subEl);
-      row.addEventListener('click', ()=> selectSearchResult(r));
-      searchResultsEl.appendChild(row);
+  container.querySelectorAll('.menu-row').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      activePlace = row.dataset.place;
+      renderPlaceFilters();
+      renderOrdersList();
     });
-  } catch(err){
-    if(err.name === 'AbortError') return;
-    searchResultsEl.innerHTML = `<div class="search-note">Search failed — try again.</div>`;
-  }
+  });
 }
 
-function selectSearchResult(r){
-  const point = { lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
-  const a = r.address || {};
-  const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+function updateCategoryCounts(){
+  const counts = { all: allPendingOrders.length, bike_delivery: 0, padala_pabili: 0 };
+  allPendingOrders.forEach(doc=>{
+    const t = doc.data().serviceType;
+    if(counts[t] !== undefined) counts[t]++;
+  });
+  document.getElementById('count-all').textContent = counts.all;
+  document.getElementById('count-bike_delivery').textContent = counts.bike_delivery;
+  document.getElementById('count-padala_pabili').textContent = counts.padala_pabili;
+}
 
-  placePoint(activeMode, point, {
-    address: r.display_name,
-    municipality,
-    landmark: extractLandmark(a, r.display_name),
-    street: a.road || ''
+function renderOrdersList(){
+  clearMarkers();
+  const list = document.getElementById('ordersList');
+
+  let filtered = allPendingOrders.filter(doc=>{
+    const o = doc.data();
+    if(activeCategory !== 'all' && o.serviceType !== activeCategory) return false;
+    if(activePlace !== 'all' && (!o.pickup || o.pickup.municipality !== activePlace)) return false;
+    return true;
   });
 
-  searchInput.value = '';
-  searchResultsEl.style.display = 'none';
-  searchResultsEl.innerHTML = '';
-  map.setView([point.lat, point.lng], 16);
-
-  if(activeMode === 'pickup' && !dropoffPoint){
-    setMode('dropoff');
-  }
-}
-
-function recalcFare(){
-  if(pickupPoint && dropoffPoint){
-    const km = distanceKmBetween(pickupPoint, dropoffPoint);
-    const fare = computeFare(km);
-    document.getElementById('distanceReadout').textContent = km.toFixed(2) + ' km';
-    document.getElementById('fareReadout').textContent = fare.toLocaleString('en-PH');
-    document.getElementById('fareBreakdown').textContent =
-      `₱${BASE_FARE} first km + ₱${PER_KM_RATE}/km × ${Math.max(0, km-1).toFixed(2)} succeeding km`;
-    placeOrderBtn.disabled = false;
-    placeOrderBtn.dataset.fare = fare;
-    placeOrderBtn.dataset.km = km.toFixed(2);
-  }
-}
-
-placeOrderBtn.addEventListener('click', async ()=>{
-  if(!currentUser || !pickupPoint || !dropoffPoint) return;
-  placeOrderBtn.disabled = true;
-  placeOrderBtn.innerHTML = '<span class="spinner"></span> Placing order…';
-
-  try{
-    const orderRef = await db.collection('orders').add({
-      customerId: currentUser.uid,
-      serviceType,
-      pickup: pickupPoint,
-      dropoff: dropoffPoint,
-      notes: document.getElementById('notes').value.trim(),
-      distanceKm: parseFloat(placeOrderBtn.dataset.km),
-      fare: parseInt(placeOrderBtn.dataset.fare, 10),
-      status: 'pending',
-      riderId: null,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  // Nearest-first when we know the rider's live location, otherwise newest-first (already sorted by the query).
+  if(riderLocation){
+    filtered = filtered.slice().sort((a,b)=>{
+      const da = distanceKmBetween(riderLocation, { lat:a.data().pickup.lat, lng:a.data().pickup.lng });
+      const db_ = distanceKmBetween(riderLocation, { lat:b.data().pickup.lat, lng:b.data().pickup.lng });
+      return da - db_;
     });
-    window.location.href = `order-status.html?id=${orderRef.id}`;
-  } catch(err){
-    alert("Couldn't place your order. Please try again.");
-    placeOrderBtn.disabled = false;
-    placeOrderBtn.textContent = "Place Order";
   }
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-state"><div class="glyph">🌤️</div>No pending deliveries match this filter right now.</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  filtered.forEach(doc=>{
+    const o = doc.data();
+
+    if(map && o.pickup){
+      const marker = L.marker([o.pickup.lat, o.pickup.lng], {
+        icon: orderIcon, title: o.pickup.address
+      }).addTo(map);
+      markers.push(marker);
+    }
+
+    const requested = !!requestedMap[doc.id];
+    const distTxt = riderLocation
+      ? distanceKmBetween(riderLocation, { lat:o.pickup.lat, lng:o.pickup.lng }).toFixed(1) + ' km away'
+      : (o.distanceKm + ' km trip');
+
+    const card = document.createElement('div');
+    card.className = 'order-card';
+    card.style.cursor = 'pointer';
+    card.innerHTML = `
+      <div class="top-row">
+        <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+        <span class="fare-tag">${fmtPeso(o.fare)}</span>
+      </div>
+      <div class="route">📍 ${o.pickup.address}</div>
+      <div class="route">🎯 ${o.dropoff.address}</div>
+      <div class="route">📏 ${distTxt}</div>
+      ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+      ${requested ? `<span class="status-badge status-requested" style="margin-top:10px;">Requested ✓</span>` : ''}
+    `;
+    card.addEventListener('click', ()=>{
+      window.location.href = `order-detail.html?id=${doc.id}`;
+    });
+    list.appendChild(card);
+  });
+}
+
+document.getElementById('categoryFilters').querySelectorAll('.menu-row').forEach(row=>{
+  row.addEventListener('click', ()=>{
+    activeCategory = row.dataset.category;
+    document.getElementById('categoryFilters').querySelectorAll('.menu-row').forEach(r=>r.classList.remove('active'));
+    row.classList.add('active');
+    renderOrdersList();
+  });
 });
 
-setMode('pickup');
-initMap();
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
 </script>
 </body>
 </html>

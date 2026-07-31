@@ -105,6 +105,7 @@
   </div>
 
   <div class="request-bar">
+    <div class="hint" id="lowBalanceWarning" style="display:none; color:var(--red); text-align:center; margin-bottom:8px;"></div>
     <button type="button" class="btn btn-primary" id="requestBtn">Request</button>
   </div>
 </div>
@@ -119,6 +120,8 @@ const params = new URLSearchParams(window.location.search);
 const orderId = params.get('id');
 let currentUser = null;
 let orderData = null;
+let currentWalletBalance = 0;
+let alreadyRequested = false;
 let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
 const ASSUMED_SPEED_KMH = 25; // fallback only, used if the routing service is unreachable
 
@@ -207,6 +210,10 @@ requireAuth(user=>{
   currentUser = user;
   if(!orderId){ window.location.href = "orders.html"; return; }
   loadOrder();
+  watchWalletBalance(null, user.uid, (bal)=>{
+    currentWalletBalance = bal;
+    refreshRequestButtonState();
+  });
   // So the Accept/Decline countdown pops up right here if the customer
   // confirms this rider while they're still viewing the order detail page
   // — previously this only fired on orders.html / current.html, meaning a
@@ -355,33 +362,56 @@ async function loadOrder(){
   if(map) updateVisuals();
 
   const reqDoc = await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).get();
-  const requested = reqDoc.exists && reqDoc.data().status !== 'declined';
-  setRequestButton(requested);
+  alreadyRequested = reqDoc.exists && reqDoc.data().status !== 'declined';
+  refreshRequestButtonState();
 }
 
-function setRequestButton(requested){
+/* Gates the Request button on the rider's wallet balance — riders below
+   MIN_WALLET_TO_ACCEPT_ORDERS can't send new requests until they refill,
+   mirroring the same floor enforced again at accept-time in the shared
+   decision modal (in case balance drops between requesting and confirming). */
+function refreshRequestButtonState(){
   const btn = document.getElementById('requestBtn');
-  if(requested){
+  const warning = document.getElementById('lowBalanceWarning');
+  if(!btn) return;
+  const lowBalance = currentWalletBalance < MIN_WALLET_TO_ACCEPT_ORDERS;
+
+  if(alreadyRequested){
+    warning.style.display = 'none';
     btn.textContent = 'Requested ✓';
     btn.disabled = true;
     btn.className = 'btn btn-outline';
-  } else {
-    btn.textContent = 'Request';
-    btn.disabled = false;
-    btn.className = 'btn btn-primary';
-    btn.onclick = async ()=>{
-      btn.disabled = true;
-      btn.textContent = 'Sending…';
-      const riderDoc = await db.collection('users').doc(currentUser.uid).get();
-      await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).set({
-        riderId: currentUser.uid,
-        riderName: riderDoc.data().name,
-        status: 'pending',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      setRequestButton(true);
-    };
+    btn.onclick = null;
+    return;
   }
+
+  if(lowBalance){
+    warning.style.display = 'block';
+    warning.textContent = `Your wallet is below ₱${MIN_WALLET_TO_ACCEPT_ORDERS} — refill before requesting deliveries.`;
+    btn.textContent = 'Refill Wallet to Continue';
+    btn.disabled = false;
+    btn.className = 'btn btn-amber';
+    btn.onclick = ()=>{ window.location.href = 'refill.html'; };
+    return;
+  }
+
+  warning.style.display = 'none';
+  btn.textContent = 'Request';
+  btn.disabled = false;
+  btn.className = 'btn btn-primary';
+  btn.onclick = async ()=>{
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    const riderDoc = await db.collection('users').doc(currentUser.uid).get();
+    await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).set({
+      riderId: currentUser.uid,
+      riderName: riderDoc.data().name,
+      status: 'pending',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alreadyRequested = true;
+    refreshRequestButtonState();
+  };
 }
 
 window.addEventListener('beforeunload', ()=>{

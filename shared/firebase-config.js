@@ -124,6 +124,7 @@ function fmtPeso(n){
    --------------------------------------------------------- */
 const COMMISSION_RATE = 0.10;       // 10% of the fare, deducted from wallet on completion
 const LOW_BALANCE_THRESHOLD = 50;   // header shows a low-balance warning below this
+const MIN_WALLET_TO_ACCEPT_ORDERS = 30; // hard floor — riders below this can't request or accept deliveries
 
 /* Marks an order completed AND deducts the 10% commission from the
    rider's wallet balance, atomically, so the two can never drift apart.
@@ -377,7 +378,25 @@ function showDecisionModal(orderId, order){
     activeDecisionOrderId = null;
   }
 
-  overlay.querySelector('#padalaAcceptBtn').addEventListener('click', ()=>{
+  overlay.querySelector('#padalaAcceptBtn').addEventListener('click', async ()=>{
+    // Safety net: even if the rider had enough balance when they sent the
+    // request, a commission from another delivery could have dropped them
+    // below the floor since then. Re-check right before committing.
+    const uid = auth.currentUser ? auth.currentUser.uid : null;
+    if(uid){
+      try{
+        const riderSnap = await db.collection('users').doc(uid).get();
+        const bal = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
+        if(bal < MIN_WALLET_TO_ACCEPT_ORDERS){
+          cleanup();
+          declineConfirmedOrder(orderId);
+          alert(`Your wallet balance is below ₱${MIN_WALLET_TO_ACCEPT_ORDERS} — refill your wallet before accepting deliveries.`);
+          window.location.href = 'refill.html';
+          return;
+        }
+      } catch(err){ /* if the balance check itself fails, fall through and allow the accept */ }
+    }
+
     cleanup();
     db.collection('orders').doc(orderId).update({ riderAccepted: true }).then(()=>{
       // Send the rider straight into the Map tab so their live location
