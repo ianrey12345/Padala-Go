@@ -45,6 +45,7 @@
         </div>
         <div class="route" id="confirmedRiderName"></div>
         <div class="route" id="confirmedRiderVehicle"></div>
+        <a href="#" id="chatWithRiderBtn" class="btn btn-outline btn-sm" style="margin-top:10px; text-decoration:none; display:inline-flex;">💬 Chat with Rider</a>
       </div>
 
       <div class="order-card" id="mapCard" style="display:none; margin-top:10px; padding:0; overflow:hidden;">
@@ -238,6 +239,7 @@ function listenToOrder(){
     } else if(o.status === 'confirmed' || o.status === 'in_progress' || o.status === 'completed'){
       document.getElementById('requestsSection').style.display = 'none';
       document.getElementById('confirmedSection').style.display = 'block';
+      document.getElementById('chatWithRiderBtn').href = `chat-thread.html?id=${orderId}`;
       updateTrackingMap(o);
       if(o.riderId){
         db.collection('users').doc(o.riderId).get().then(rd=>{

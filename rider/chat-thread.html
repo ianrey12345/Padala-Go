@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  html, body{ height:100%; }
+  body{ background:var(--paper); }
+  .chat-shell{ display:flex; flex-direction:column; height:100vh; max-width:480px; margin:0 auto; }
+  .chat-topbar{ background:var(--teal); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:10px; flex-shrink:0; }
+  .chat-topbar .back{ color:#fff; text-decoration:none; font-size:20px; }
+  .chat-topbar .who{ font-family:'Sora'; font-weight:700; font-size:16px; }
+  .chat-topbar .sub{ font-size:11.5px; opacity:0.8; }
+  .messages{ flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .bubble{ max-width:75%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.4; word-wrap:break-word; }
+  .bubble.mine{ align-self:flex-end; background:var(--teal); color:#fff; border-bottom-right-radius:4px; }
+  .bubble.theirs{ align-self:flex-start; background:var(--cream); color:var(--ink); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .bubble .sender{ font-size:11px; font-weight:700; margin-bottom:2px; opacity:0.75; }
+  .bubble .meta{ font-size:10.5px; opacity:0.65; margin-top:4px; }
+  .composer{ display:flex; gap:8px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:#fff; flex-shrink:0; }
+  .composer input{ flex:1; padding:11px 14px; border-radius:20px; border:1.5px solid var(--line); font-size:14px; font-family:'Inter'; }
+  .composer input:focus{ outline:none; border-color:var(--teal); }
+  .composer button{ width:42px; height:42px; border-radius:50%; background:var(--teal); color:#fff; border:none; font-size:18px; cursor:pointer; flex-shrink:0; }
+  .composer button:disabled{ opacity:0.5; }
+</style>
+</head>
+<body>
+<div class="chat-shell">
+  <div class="chat-topbar">
+    <a href="chat.html" class="back">←</a>
+    <div>
+      <div class="who" id="chatTitle">Chat</div>
+      <div class="sub" id="chatSubtitle"></div>
+    </div>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="empty-state">Loading…</div>
+  </div>
+
+  <form class="composer" id="composerForm">
+    <input type="text" id="messageInput" placeholder="Type a message…" autocomplete="off" required>
+    <button type="submit" id="sendBtn">➤</button>
+  </form>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const chatType = params.get('type'); // 'community' or 'client'
+const orderId = params.get('id');
+let currentUser = null;
+let myName = 'Rider';
+let messagesRef = null;
+
+requireAuth(async user=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  myName = doc.data().name || 'Rider';
+
+  if(chatType === 'community'){
+    // Open room — every rider reads and writes into the same thread.
+    document.getElementById('chatTitle').textContent = '📢 Riders Chat';
+    document.getElementById('chatSubtitle').textContent = 'Open to all riders';
+    messagesRef = db.collection('riderCommunityChat');
+    listenToMessages(true);
+  } else if(chatType === 'client'){
+    if(!orderId){ window.location.href = "chat.html"; return; }
+    const orderDoc = await db.collection('orders').doc(orderId).get();
+    // Only the rider actually confirmed on this order can open the thread.
+    if(!orderDoc.exists || orderDoc.data().riderId !== user.uid){
+      window.location.href = "chat.html";
+      return;
+    }
+    const o = orderDoc.data();
+    try{
+      const custDoc = await db.collection('users').doc(o.customerId).get();
+      document.getElementById('chatTitle').textContent = custDoc.exists ? (custDoc.data().name || 'Client') : 'Client';
+    } catch(e){
+      document.getElementById('chatTitle').textContent = 'Client';
+    }
+    document.getElementById('chatSubtitle').textContent = o.pickup ? o.pickup.address : '';
+    messagesRef = db.collection('orders').doc(orderId).collection('messages');
+    listenToMessages(false);
+  } else {
+    window.location.href = "chat.html";
+  }
+});
+
+function listenToMessages(showSender){
+  messagesRef.orderBy('createdAt','asc').onSnapshot(snap=>{
+    const container = document.getElementById('messages');
+    if(snap.empty){
+      container.innerHTML = `<div class="empty-state"><div class="glyph">💬</div>${showSender ? 'Say hi to your fellow riders!' : 'Say hi to your client!'}</div>`;
+      return;
+    }
+    container.innerHTML = '';
+    snap.forEach(doc=>{
+      const m = doc.data();
+      const mine = m.senderId === currentUser.uid;
+      const bubble = document.createElement('div');
+      bubble.className = `bubble ${mine ? 'mine' : 'theirs'}`;
+      bubble.innerHTML = `
+        ${showSender && !mine ? `<div class="sender">${escapeHtml(m.senderName || 'Rider')}</div>` : ''}
+        ${escapeHtml(m.text)}
+        <div class="meta">${m.createdAt ? timeAgo(m.createdAt) : 'sending…'}</div>
+      `;
+      container.appendChild(bubble);
+    });
+    container.scrollTop = container.scrollHeight;
+  }, err=>{
+    document.getElementById('messages').innerHTML = `<div class="empty-state">Couldn't load messages.</div>`;
+  });
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+document.getElementById('composerForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const input = document.getElementById('messageInput');
+  const text = input.value.trim();
+  if(!text || !messagesRef) return;
+  const sendBtn = document.getElementById('sendBtn');
+  sendBtn.disabled = true;
+  input.value = '';
+  try{
+    await messagesRef.add({
+      senderId: currentUser.uid,
+      senderRole: 'rider',
+      senderName: myName,
+      text,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch(err){
+    input.value = text; // restore the draft so nothing gets lost on failure
+  }
+  sendBtn.disabled = false;
+  input.focus();
+});
+</script>
+</body>
+</html>
