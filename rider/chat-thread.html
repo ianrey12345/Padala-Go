@@ -111,7 +111,7 @@ function listenToMessages(showSender){
       const bubble = document.createElement('div');
       bubble.className = `bubble ${mine ? 'mine' : 'theirs'}`;
       bubble.innerHTML = `
-        ${showSender && !mine ? `<div class="sender">${escapeHtml(m.senderName || 'Rider')}</div>` : ''}
+        ${showSender ? `<div class="sender">${escapeHtml(m.senderName || 'Rider')}</div>` : ''}
         ${escapeHtml(m.text)}
         <div class="meta">${m.createdAt ? timeAgo(m.createdAt) : 'sending…'}</div>
       `;
