@@ -207,6 +207,11 @@ requireAuth(user=>{
   currentUser = user;
   if(!orderId){ window.location.href = "orders.html"; return; }
   loadOrder();
+  // So the Accept/Decline countdown pops up right here if the customer
+  // confirms this rider while they're still viewing the order detail page
+  // — previously this only fired on orders.html / current.html, meaning a
+  // rider had to leave this page to see it.
+  watchForRiderConfirmations(user.uid);
 });
 
 initMap();

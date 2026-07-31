@@ -147,18 +147,59 @@ function tickEtaCountdown(){
 }
 
 /* ---------------------------------------------------------
-   fetchRoadRoute / projectOntoRoute / routeLengthKm now live in
-   shared/firebase-config.js (used by this page and the rider's
-   order-preview page). This page just adds its own caching layer
-   on top: only re-fetch when the destination changes, the rider
-   drifts noticeably off the drawn route, or the route has gone
-   stale — since router.project-osrm.org is a shared demo server,
-   not something to hit on every GPS tick.
+   Real road routing via OSRM's free public routing server —
+   no API key required. Returns [[lat,lng], ...] plus distance.
+   This is a shared demo server, so we cache the result and
+   only re-fetch when the destination changes, the rider drifts
+   noticeably off the drawn route, or the route has gone stale.
    --------------------------------------------------------- */
-let currentRoute = null;      // { coords, destKey, distanceKm, durationMin }
+let currentRoute = null;      // { coords, destKey, distanceKm }
 let lastRouteFetchAt = 0;
 const ROUTE_REFRESH_MS = 45000;
 const ROUTE_DEVIATION_KM = 0.25;
+
+async function fetchRoadRoute(origin, dest){
+  const url = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(!data.routes || !data.routes.length) throw new Error('No route found');
+  const route = data.routes[0];
+  const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]); // GeoJSON is [lng,lat]
+  return { coords, distanceKm: route.distance / 1000, durationMin: route.duration / 60 };
+}
+
+/* Closest point on a single segment to a {lat,lng} point — treats the
+   small local area as planar, which is accurate enough at city scale. */
+function closestPointOnSegment(p1, p2, p){
+  const [y1, x1] = p1, [y2, x2] = p2;
+  const px = p.lng, py = p.lat;
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx*dx + dy*dy;
+  let t = lenSq === 0 ? 0 : ((px - x1)*dx + (py - y1)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return [y1 + t*dy, x1 + t*dx];
+}
+
+/* Projects the rider's live position onto the route polyline, returning
+   where along the route they currently are — this is what lets us draw
+   a genuine "distance covered" overlay instead of a straight guess. */
+function projectOntoRoute(coords, pos){
+  let bestDistKm = Infinity, bestIdx = 0, bestPoint = coords[0];
+  for(let i=0; i<coords.length-1; i++){
+    const cand = closestPointOnSegment(coords[i], coords[i+1], pos);
+    const d = distanceKmBetween({ lat: cand[0], lng: cand[1] }, pos);
+    if(d < bestDistKm){ bestDistKm = d; bestIdx = i; bestPoint = cand; }
+  }
+  return { index: bestIdx, point: bestPoint, offRouteKm: bestDistKm };
+}
+
+function routeLengthKm(coords){
+  let total = 0;
+  for(let i=0; i<coords.length-1; i++){
+    total += distanceKmBetween({ lat: coords[i][0], lng: coords[i][1] }, { lat: coords[i+1][0], lng: coords[i+1][1] });
+  }
+  return total;
+}
 
 async function ensureRoute(origin, dest, destKey){
   const now = Date.now();
@@ -202,6 +243,7 @@ requireAuth(async (user)=>{
     warn.style.display = isLow ? 'inline' : 'none';
   });
   listenToActiveOrder();
+  watchForRiderConfirmations(user.uid);
 });
 
 const riderIcon = L.divIcon({

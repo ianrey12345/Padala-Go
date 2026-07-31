@@ -97,6 +97,7 @@ requireAuth(async (user)=>{
   riderName = doc.data().name || 'Rider';
   watchWalletBalance('bigBalance', user.uid);
   listenToPendingRequests(user.uid);
+  watchForRiderConfirmations(user.uid);
 });
 
 const chipRow = document.getElementById('chipRow');

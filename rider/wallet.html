@@ -55,6 +55,7 @@ requireAuth(async (user)=>{
     window.location.href = "index.html";
     return;
   }
+  watchForRiderConfirmations(user.uid);
   watchWalletBalance('bigBalance', user.uid, (bal)=>{
     document.getElementById('lowHint').style.display = bal < LOW_BALANCE_THRESHOLD ? 'inline-block' : 'none';
   });
