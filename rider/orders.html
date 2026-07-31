@@ -345,31 +345,11 @@ function renderOrdersList(){
       <div class="route">🎯 ${o.dropoff.address}</div>
       <div class="route">📏 ${distTxt}</div>
       ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
-      <button class="btn ${requested ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:10px;" ${requested ? 'disabled' : ''}>
-        ${requested ? 'Requested ✓' : 'Send Request'}
-      </button>
+      ${requested ? `<span class="status-badge status-requested" style="margin-top:10px;">Requested ✓</span>` : ''}
     `;
     card.addEventListener('click', ()=>{
       window.location.href = `order-detail.html?id=${doc.id}`;
     });
-    const btn = card.querySelector('button');
-    if(!requested){
-      btn.addEventListener('click', async (e)=>{
-        e.stopPropagation();
-        btn.disabled = true;
-        btn.textContent = 'Sending…';
-        const riderDoc = await db.collection('users').doc(currentUser.uid).get();
-        await doc.ref.collection('requests').doc(currentUser.uid).set({
-          riderId: currentUser.uid,
-          riderName: riderDoc.data().name,
-          status: 'pending',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        requestedMap[doc.id] = true;
-        btn.textContent = 'Requested ✓';
-        btn.className = 'btn btn-outline btn-sm';
-      });
-    }
     list.appendChild(card);
   });
 }
