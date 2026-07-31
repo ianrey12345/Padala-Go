@@ -476,7 +476,7 @@ function renderStage(){
   } else if(o.status === 'confirmed' && o.arrivedAtPickup){
     stageText.textContent = "Arrived at pickup point";
     stageSub.textContent = "Customer has been notified. Once you have the item, mark it picked up.";
-    actionBtn.textContent = "Mark Picked Up";
+    actionBtn.textContent = "Lets Go!";
     actionBtn.className = "btn btn-primary";
     actionBtn.onclick = ()=> orderRef.update({ status: 'in_progress' });
   } else if(o.status === 'in_progress'){
