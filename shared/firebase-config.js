@@ -321,6 +321,7 @@ function showBrowserNotification(title, body){
    even if the rider's page reloads mid-countdown.
    --------------------------------------------------------- */
 let activeDecisionOrderId = null;
+let activeDecisionTimer = null;
 
 function showDecisionModal(orderId, order){
   if(activeDecisionOrderId === orderId) return; // already showing for this order
@@ -365,14 +366,15 @@ function showDecisionModal(orderId, order){
     const remaining = Math.max(0, Math.round((deadlineMs - Date.now()) / 1000));
     numEl.textContent = remaining;
     if(remaining <= 0){
-      clearInterval(timer);
       cleanup();
       declineConfirmedOrder(orderId);
     }
   }, 250);
+  activeDecisionTimer = timer;
 
   function cleanup(){
     clearInterval(timer);
+    if(activeDecisionTimer === timer) activeDecisionTimer = null;
     overlay.remove();
     activeDecisionOrderId = null;
   }
@@ -396,14 +398,29 @@ function showDecisionModal(orderId, order){
   });
 }
 
-function declineConfirmedOrder(orderId){
+async function declineConfirmedOrder(orderId){
   const riderId = auth.currentUser ? auth.currentUser.uid : null;
-  db.collection('orders').doc(orderId).update({
-    status: 'pending',
-    riderId: null,
-    riderAccepted: null,
-    riderDecisionDeadline: null
-  });
+  const orderRef = db.collection('orders').doc(orderId);
+
+  // Guard against a stale countdown (e.g. a timer left running on another
+  // open tab/page) firing AFTER the rider already accepted or declined
+  // this same order elsewhere. Only revert to pending if the decision is
+  // still genuinely pending on the server.
+  try{
+    await db.runTransaction(async (t)=>{
+      const snap = await t.get(orderRef);
+      if(!snap.exists) return;
+      const o = snap.data();
+      if(o.riderAccepted !== null && o.riderAccepted !== undefined) return; // already resolved — do nothing
+      t.update(orderRef, {
+        status: 'pending',
+        riderId: null,
+        riderAccepted: null,
+        riderDecisionDeadline: null
+      });
+    });
+  } catch(e){ /* if this fails, leave the order as-is rather than risk corrupting it */ }
+
   if(riderId){
     // Mark this rider's own request as declined so it isn't offered to them again automatically.
     db.collection('orders').doc(orderId).collection('requests').doc(riderId)
@@ -413,6 +430,10 @@ function declineConfirmedOrder(orderId){
 
 function dismissDecisionModal(orderId){
   if(activeDecisionOrderId !== orderId) return;
+  if(activeDecisionTimer){
+    clearInterval(activeDecisionTimer);
+    activeDecisionTimer = null;
+  }
   const existing = document.getElementById('padalaDecisionModal');
   if(existing) existing.remove();
   activeDecisionOrderId = null;
@@ -500,6 +521,13 @@ function watchForRiderConfirmations(riderId){
         const o = doc.data();
         if(o.riderAccepted === null || o.riderAccepted === undefined){
           showDecisionModal(doc.id, o);
+        } else {
+          // Already accepted (or declined) — most likely from another tab/
+          // page, since every rider page runs this same listener. Close any
+          // countdown modal still open on THIS page for it, and make sure
+          // its interval is actually stopped (dismissDecisionModal handles
+          // that) so it can't fire a stale decline after the fact.
+          dismissDecisionModal(doc.id);
         }
       });
     });
