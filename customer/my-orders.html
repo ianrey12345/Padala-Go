@@ -5,6 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Orders · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .cancel-btn{
+    width:auto; padding:8px 14px; font-size:12.5px; border-color:var(--red); color:var(--red);
+  }
+  .cancel-btn:hover{ background:#FCEBEB; }
+  .card-footer{
+    display:flex; justify-content:space-between; align-items:center; margin-top:10px;
+  }
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:18px; padding:26px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal-card .note{ font-size:13px; color:#8A8178; margin:8px 0 20px; line-height:1.4; }
+  .modal-actions{ display:flex; gap:10px; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -25,6 +44,8 @@
   </div>
 </div>
 
+<div id="modalRoot"></div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -32,6 +53,9 @@
 <script>
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
 
+// Cancel is available on every order, at any status — the customer
+// decides whether it still makes sense (e.g. cancelling something
+// already completed just records the request; it doesn't undo anything).
 requireAuth(user=>{
   db.collection('orders')
     .where('customerId','==', user.uid)
@@ -45,21 +69,34 @@ requireAuth(user=>{
       container.innerHTML = '';
       snap.forEach(doc=>{
         const o = doc.data();
-        const card = document.createElement('a');
-        card.href = `order-status.html?id=${doc.id}`;
-        card.style.textDecoration = 'none';
-        card.style.color = 'inherit';
+
+        const card = document.createElement('div');
+        card.className = 'order-card';
+        card.style.cursor = 'pointer';
         card.innerHTML = `
-          <div class="order-card">
-            <div class="top-row">
-              <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-              <span class="fare-tag">${fmtPeso(o.fare)}</span>
-            </div>
-            <div class="route">📍 ${o.pickup.address}</div>
-            <div class="route">🎯 ${o.dropoff.address}</div>
+          <div class="top-row">
+            <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+            <span class="fare-tag">${fmtPeso(o.fare)}</span>
+          </div>
+          <div class="route">📍 ${o.pickup.address}</div>
+          <div class="route">🎯 ${o.dropoff.address}</div>
+          <div class="card-footer">
+            <button type="button" class="btn btn-outline cancel-btn" data-id="${doc.id}">Cancel Order</button>
             <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
           </div>
         `;
+
+        // Tapping the card (but not the Cancel button) opens the order.
+        card.addEventListener('click', (e)=>{
+          if(e.target.closest('.cancel-btn')) return;
+          window.location.href = `order-status.html?id=${doc.id}`;
+        });
+
+        card.querySelector('.cancel-btn').addEventListener('click', (e)=>{
+          e.stopPropagation();
+          showCancelModal(doc.id, o);
+        });
+
         container.appendChild(card);
       });
     }, err=>{
@@ -67,6 +104,45 @@ requireAuth(user=>{
         `<div class="empty-state">Couldn't load orders. If this is your first order, Firestore may need an index — check the browser console for a link to create it.</div>`;
     });
 });
+
+function showCancelModal(orderId, o){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const hasRider = !!o.riderId && (o.status === 'confirmed' || o.status === 'in_progress');
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div style="font-size:30px;">🚫</div>
+      <div style="font-weight:700; font-size:16px; color:var(--teal-dark); margin-top:6px;">Cancel this order?</div>
+      <div class="note">
+        ${hasRider ? "Your rider has already been assigned and will be notified. " : ""}This can't be undone — you'll need to place a new order if you change your mind.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="modalKeepBtn">Keep Order</button>
+        <button class="btn btn-primary" id="modalCancelOrderBtn" style="background:var(--red);">Cancel Order</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').appendChild(overlay);
+
+  overlay.querySelector('#modalKeepBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#modalCancelOrderBtn').addEventListener('click', async ()=>{
+    const btn = overlay.querySelector('#modalCancelOrderBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try{
+      await db.collection('orders').doc(orderId).update({
+        status: 'cancelled',
+        cancelledAt: firebase.firestore.FieldValue.serverTimestamp(),
+        cancelledBy: 'customer'
+      });
+      overlay.remove();
+    } catch(err){
+      btn.disabled = false;
+      btn.textContent = 'Cancel Order';
+      alert("Couldn't cancel this order. Please try again.");
+    }
+  });
+}
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
   e.preventDefault();
