@@ -586,6 +586,7 @@ function getChatLastRead(orderId){
 const activeMessageListeners = new Map(); // orderId -> unsubscribe function
 
 function watchForNewMessages(riderId, onUnreadChange){
+  console.log('[DEBUG] watchForNewMessages started for riderId:', riderId);
   requestNotificationPermission();
   const unreadOrderIds = new Set();
 
@@ -597,10 +598,12 @@ function watchForNewMessages(riderId, onUnreadChange){
     .where('riderId','==', riderId)
     .where('status','in', ['confirmed','in_progress','completed'])
     .onSnapshot(snap=>{
+      console.log('[DEBUG] watchForNewMessages query snapshot fired. Matching orders:', snap.size, snap.docs.map(d=>({id:d.id, status:d.data().status})));
       const currentOrderIds = new Set();
       snap.forEach(doc=>{
         currentOrderIds.add(doc.id);
         if(!activeMessageListeners.has(doc.id)){
+          console.log('[DEBUG] Attaching message listener for order:', doc.id);
           activeMessageListeners.set(
             doc.id,
             attachMessageListener(doc.id, riderId, unreadOrderIds, reportUnread)
@@ -632,25 +635,42 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
   // listener first attaches (which happens on every fresh page load, since
   // activeMessageListeners is just an in-memory Map that resets on
   // navigation). To avoid replaying an OLD message as a brand-new alert
-  // every time a rider page loads, we only alert for messages whose
-  // createdAt is after the moment this listener started listening — not
-  // simply "whichever message happened to be delivered first." That
-  // distinction matters: if a customer sends a message right as the rider's
-  // page finishes loading, that message IS genuinely new and must still
-  // alert, even though it arrives as this listener's first snapshot.
-  const listenerStartMs = Date.now();
+  // every time a rider page loads, we track the ID of whichever message
+  // was on top the first time this listener sees data, as a baseline —
+  // and only alert once the top message's ID actually changes to
+  // something different from that baseline. This avoids comparing
+  // timestamps across client/server clocks (which can silently misfire
+  // if the device's clock is off), and still correctly alerts for a
+  // message sent right as the page finishes loading, since a genuinely
+  // new message always gets a new document ID.
+  let baselineMsgId = undefined; // undefined = not established yet
 
   return db.collection('orders').doc(orderId).collection('messages')
     .orderBy('createdAt','desc')
     .limit(1)
     .onSnapshot(snap=>{
+      console.log('[DEBUG] message listener fired for order', orderId, 'empty:', snap.empty);
       if(snap.empty) return;
-      const m = snap.docs[0].data();
-      if(!m.createdAt) return; // still waiting on the server timestamp to resolve
-      if(m.senderId === riderId) return; // the rider's own message — ignore
+      const topDoc = snap.docs[0];
+      const m = topDoc.data();
+      console.log('[DEBUG] top message:', { id: topDoc.id, senderId: m.senderId, text: m.text, createdAt: m.createdAt });
+      if(!m.createdAt){ console.log('[DEBUG] skipped: createdAt not resolved yet'); return; }
+
+      if(baselineMsgId === undefined){
+        // First delivery from this listener — record it as the baseline,
+        // but only alert-worthy logic below applies to actual CHANGES.
+        baselineMsgId = topDoc.id;
+        console.log('[DEBUG] baseline established:', baselineMsgId);
+      }
+      const isNewSinceListening = topDoc.id !== baselineMsgId;
+      baselineMsgId = topDoc.id;
+      console.log('[DEBUG] isNewSinceListening:', isNewSinceListening);
+
+      if(m.senderId === riderId){ console.log('[DEBUG] skipped: this is the rider\'s own message'); return; }
 
       const lastRead = getChatLastRead(orderId);
       const isUnread = m.createdAt.toMillis() > lastRead;
+      console.log('[DEBUG] lastRead:', lastRead, 'messageTime:', m.createdAt.toMillis(), 'isUnread:', isUnread);
 
       if(!isUnread){
         unreadOrderIds.delete(orderId);
@@ -659,6 +679,7 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       }
 
       if(window.padalaGoOpenChatOrderId === orderId){
+        console.log('[DEBUG] skipped: this exact chat thread is currently open');
         // Rider already has this exact thread open — count as read,
         // don't interrupt them with a notification for it.
         markChatRead(orderId);
@@ -670,13 +691,14 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       // Still reflect it in the unread badge count regardless of when it
       // was sent — a genuinely unread message should still show as unread.
       // It's only the sound/toast/browser-notification "alert" that's
-      // conditional on being sent after this listener started.
+      // conditional on this being a message that arrived after this
+      // listener attached.
       unreadOrderIds.add(orderId);
       reportUnread();
 
-      const sentWhileListening = m.createdAt.toMillis() >= listenerStartMs;
-      if(!sentWhileListening) return; // pre-existing unread message from before this page load — don't alert
+      if(!isNewSinceListening){ console.log('[DEBUG] skipped alert: pre-existing message, not new since listening'); return; }
 
+      console.log('[DEBUG] FIRING ALERT for order', orderId);
       playRingtone();
       showToast('💬 You have a message from the customer');
       showBrowserNotification('New Message', 'You have a message from the customer.');
