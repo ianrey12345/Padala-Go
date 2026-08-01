@@ -75,10 +75,12 @@ requireAuth(async user=>{
   });
 
   // Client chat unlocks only for orders this rider has actually been
-  // confirmed on — matches "if the rider accept the client".
+  // confirmed on, and stays available while it's active — matches "if
+  // the rider accept the client". Once the delivery is completed, the
+  // chat is no longer relevant, so it drops off this list.
   db.collection('orders')
     .where('riderId','==', user.uid)
-    .where('status','in', ['confirmed','in_progress','completed'])
+    .where('status','in', ['confirmed','in_progress'])
     .orderBy('createdAt','desc')
     .onSnapshot(async snap=>{
       const container = document.getElementById('clientChatsList');

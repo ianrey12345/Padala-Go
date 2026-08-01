@@ -77,8 +77,10 @@ requireAuth(async user=>{
   } else if(chatType === 'client'){
     if(!orderId){ window.location.href = "chat.html"; return; }
     const orderDoc = await db.collection('orders').doc(orderId).get();
-    // Only the rider actually confirmed on this order can open the thread.
-    if(!orderDoc.exists || orderDoc.data().riderId !== user.uid){
+    // Only the rider actually confirmed on this order can open the thread,
+    // and only while it's still active — once completed, this chat is no
+    // longer accessible (matches it disappearing from the Chat list).
+    if(!orderDoc.exists || orderDoc.data().riderId !== user.uid || orderDoc.data().status === 'completed'){
       window.location.href = "chat.html";
       return;
     }
