@@ -328,7 +328,7 @@ function showDecisionModal(orderId, order){
 
   const deadlineMs = order.riderDecisionDeadline
     ? order.riderDecisionDeadline.toMillis()
-    : Date.now() + 15000;
+    : Date.now() + 5000;
 
   const remainingNow = Math.max(0, Math.round((deadlineMs - Date.now()) / 1000));
   if(remainingNow <= 0){
@@ -465,7 +465,7 @@ function watchForOrderCancellations(riderId){
         if(localStorage.getItem(seenKey)) return;
         localStorage.setItem(seenKey, '1');
 
-        dismissDecisionModal(change.doc.id); // in case the 15s accept/decline popup was still showing
+        dismissDecisionModal(change.doc.id); // in case the 5s accept/decline popup was still showing
         playRingtone();
         showToast('🚫 A customer cancelled their delivery.');
         showBrowserNotification('Order Cancelled', 'A customer cancelled a delivery you were assigned to.');
@@ -490,7 +490,7 @@ function watchForRiderConfirmations(riderId){
           if(!localStorage.getItem(seenKey)){
             localStorage.setItem(seenKey, '1');
             playRingtone();
-            showToast('🎉 Your delivery request was accepted! Accept it within 15 seconds.');
+            showToast('🎉 Your delivery request was accepted! Accept it within 5 seconds.');
             showBrowserNotification('Delivery Confirmed!', 'A customer accepted your request — open the app to accept or decline.');
           }
         }
