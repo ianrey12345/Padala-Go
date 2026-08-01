@@ -53,9 +53,10 @@
 <script>
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
 
-// Cancel is available on every order, at any status — the customer
-// decides whether it still makes sense (e.g. cancelling something
-// already completed just records the request; it doesn't undo anything).
+// Cancel is only offered while the order is still in flight — once it's
+// completed (or already cancelled), cancelling it doesn't mean anything.
+const CANCELLABLE_STATUSES = ['pending', 'confirmed', 'in_progress'];
+
 requireAuth(user=>{
   db.collection('orders')
     .where('customerId','==', user.uid)
@@ -69,6 +70,7 @@ requireAuth(user=>{
       container.innerHTML = '';
       snap.forEach(doc=>{
         const o = doc.data();
+        const canCancel = CANCELLABLE_STATUSES.includes(o.status);
 
         const card = document.createElement('div');
         card.className = 'order-card';
@@ -81,7 +83,7 @@ requireAuth(user=>{
           <div class="route">📍 ${o.pickup.address}</div>
           <div class="route">🎯 ${o.dropoff.address}</div>
           <div class="card-footer">
-            <button type="button" class="btn btn-outline cancel-btn" data-id="${doc.id}">Cancel Order</button>
+            ${canCancel ? `<button type="button" class="btn btn-outline cancel-btn" data-id="${doc.id}">Cancel Order</button>` : `<span></span>`}
             <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
           </div>
         `;
@@ -92,10 +94,13 @@ requireAuth(user=>{
           window.location.href = `order-status.html?id=${doc.id}`;
         });
 
-        card.querySelector('.cancel-btn').addEventListener('click', (e)=>{
-          e.stopPropagation();
-          showCancelModal(doc.id, o);
-        });
+        const cancelBtn = card.querySelector('.cancel-btn');
+        if(cancelBtn){
+          cancelBtn.addEventListener('click', (e)=>{
+            e.stopPropagation();
+            showCancelModal(doc.id, o);
+          });
+        }
 
         container.appendChild(card);
       });
