@@ -245,6 +245,7 @@ requireAuth(async (user)=>{
   listenToActiveOrder();
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
 });
 
 const riderIcon = L.divIcon({
