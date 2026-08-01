@@ -26,7 +26,7 @@ const db = firebase.firestore();
    the first kilometer is covered by BASE_FARE, every
    kilometer after that costs PER_KM_RATE.
    --------------------------------------------------------- */
-const BASE_FARE = 15.2;      // covers the first kilometer — adjust as needed
+const BASE_FARE = 18.2;      // covers the first kilometer — adjust as needed
 const PER_KM_RATE = 12;    // pesos per km after the first
 
 function computeFare(distanceKm){
@@ -122,10 +122,10 @@ function fmtPeso(n){
    Every change is logged to users/{riderId}/walletTransactions
    so the Statistics page can show a full breakdown.
    --------------------------------------------------------- */
-const COMMISSION_RATE = 0.10;       // 10% of the fare, deducted from wallet on completion
+const COMMISSION_RATE = 0.12;       // 12% of the fare, deducted from wallet on completion
 const LOW_BALANCE_THRESHOLD = 50;   // header shows a low-balance warning below this
 
-/* Marks an order completed AND deducts the 10% commission from the
+/* Marks an order completed AND deducts the 12% commission from the
    rider's wallet balance, atomically, so the two can never drift apart.
    Also writes a walletTransactions record for the Statistics page. */
 async function completeOrderWithCommission(orderId, riderId, fare){
