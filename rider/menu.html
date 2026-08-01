@@ -58,6 +58,7 @@ requireAuth(async (user)=>{
   watchWalletBalance('walletBalanceRow', user.uid);
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
 });
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{

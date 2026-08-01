@@ -532,3 +532,110 @@ function watchForRiderConfirmations(riderId){
       });
     });
 }
+
+/* ---------------------------------------------------------
+   Rider "new message from customer" alerts. Same call pattern
+   as watchForRiderConfirmations / watchForOrderCancellations —
+   call once, from any rider page, after confirming the user is
+   a rider.
+
+   How "unread" is tracked: a per-order "last read" timestamp
+   lives in localStorage, updated whenever the rider actually
+   opens that order's chat thread (see markChatRead(), wired up
+   in rider/chat-thread.html). Comparing the latest message's
+   server timestamp against that value means:
+     - A message that arrives while the rider is off the app
+       still triggers a notification the next time ANY rider
+       page loads — it isn't silently treated as "already seen"
+       just because it existed before this listener attached.
+     - Re-opening a page doesn't re-notify for messages already
+       read.
+     - If the rider currently has that exact thread open
+       (window.padalaGoOpenChatOrderId), we mark it read instead
+       of buzzing them for a conversation they're already in.
+   --------------------------------------------------------- */
+function chatLastReadKey(orderId){ return 'padalaGoChatLastRead_' + orderId; }
+
+function markChatRead(orderId){
+  localStorage.setItem(chatLastReadKey(orderId), Date.now().toString());
+}
+
+function getChatLastRead(orderId){
+  const v = localStorage.getItem(chatLastReadKey(orderId));
+  return v ? parseInt(v, 10) : 0;
+}
+
+const activeMessageListeners = new Map(); // orderId -> unsubscribe function
+
+function watchForNewMessages(riderId, onUnreadChange){
+  requestNotificationPermission();
+  const unreadOrderIds = new Set();
+
+  function reportUnread(){
+    if(onUnreadChange) onUnreadChange(unreadOrderIds.size);
+  }
+
+  db.collection('orders')
+    .where('riderId','==', riderId)
+    .where('status','in', ['confirmed','in_progress','completed'])
+    .onSnapshot(snap=>{
+      const currentOrderIds = new Set();
+      snap.forEach(doc=>{
+        currentOrderIds.add(doc.id);
+        if(!activeMessageListeners.has(doc.id)){
+          activeMessageListeners.set(
+            doc.id,
+            attachMessageListener(doc.id, riderId, unreadOrderIds, reportUnread)
+          );
+        }
+      });
+      // Stop listening to orders that dropped out of this query
+      // (e.g. cancelled) so listeners don't leak.
+      for(const orderId of Array.from(activeMessageListeners.keys())){
+        if(!currentOrderIds.has(orderId)){
+          activeMessageListeners.get(orderId)();
+          activeMessageListeners.delete(orderId);
+          unreadOrderIds.delete(orderId);
+        }
+      }
+      reportUnread();
+    });
+}
+
+function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
+  return db.collection('orders').doc(orderId).collection('messages')
+    .orderBy('createdAt','desc')
+    .limit(1)
+    .onSnapshot(snap=>{
+      if(snap.empty) return;
+      const m = snap.docs[0].data();
+      if(!m.createdAt) return; // still waiting on the server timestamp to resolve
+      if(m.senderId === riderId) return; // the rider's own message — ignore
+
+      const lastRead = getChatLastRead(orderId);
+      const isUnread = m.createdAt.toMillis() > lastRead;
+
+      if(!isUnread){
+        unreadOrderIds.delete(orderId);
+        reportUnread();
+        return;
+      }
+
+      if(window.padalaGoOpenChatOrderId === orderId){
+        // Rider already has this exact thread open — count as read,
+        // don't interrupt them with a notification for it.
+        markChatRead(orderId);
+        unreadOrderIds.delete(orderId);
+        reportUnread();
+        return;
+      }
+
+      unreadOrderIds.add(orderId);
+      reportUnread();
+
+      playRingtone();
+      const preview = m.text && m.text.length > 40 ? m.text.slice(0, 40) + '…' : (m.text || '');
+      showToast(`💬 ${m.senderName || 'Your customer'}: ${preview}`);
+      showBrowserNotification(`New message from ${m.senderName || 'your customer'}`, m.text || 'You have a new message.');
+    });
+}

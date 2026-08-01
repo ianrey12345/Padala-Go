@@ -129,6 +129,7 @@ requireAuth(async user=>{
   listenToPendingOrders();
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
   watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
     const pill = document.getElementById('walletPill');
     const warn = document.getElementById('walletWarn');

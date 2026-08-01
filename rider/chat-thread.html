@@ -91,6 +91,13 @@ requireAuth(async user=>{
     }
     document.getElementById('chatSubtitle').textContent = o.pickup ? o.pickup.address : '';
     messagesRef = db.collection('orders').doc(orderId).collection('messages');
+
+    // Tell the global new-message listener (watchForNewMessages, running on
+    // every rider page) that this thread is the one currently on screen —
+    // it'll mark incoming messages here as read instead of alerting for them.
+    window.padalaGoOpenChatOrderId = orderId;
+    markChatRead(orderId);
+
     listenToMessages(false);
   } else {
     window.location.href = "chat.html";
@@ -118,6 +125,13 @@ function listenToMessages(showSender){
       container.appendChild(bubble);
     });
     container.scrollTop = container.scrollHeight;
+
+    // Keep the "last read" marker current while this thread is actively
+    // open, so a message that streams in while the rider is looking at
+    // it doesn't later show up as unread once they navigate away.
+    if(chatType === 'client' && orderId){
+      markChatRead(orderId);
+    }
   }, err=>{
     document.getElementById('messages').innerHTML = `<div class="empty-state">Couldn't load messages.</div>`;
   });

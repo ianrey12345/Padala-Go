@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chat · Padala Go Rider</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .chat-row-wrap{ position:relative; }
+  .unread-dot{
+    position:absolute; top:14px; right:14px;
+    width:10px; height:10px; border-radius:50%; background:var(--red);
+    box-shadow:0 0 0 2px #fff;
+  }
+  .tabbar a{ position:relative; }
+  .tab-badge-dot{
+    position:absolute; top:2px; right:calc(50% - 20px);
+    width:8px; height:8px; border-radius:50%; background:var(--red);
+    box-shadow:0 0 0 2px var(--paper);
+  }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -32,7 +46,7 @@
   <div class="tabbar">
     <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
     <a href="current.html"><span class="g">📋</span>Current</a>
-    <a href="chat.html" class="active"><span class="g">💬</span>Chat</a>
+    <a href="chat.html" class="active"><span class="g">💬</span>Chat<span id="chatTabBadge" class="tab-badge-dot" style="display:none;"></span></a>
     <a href="map.html"><span class="g">🗺️</span>Map</a>
     <a href="menu.html"><span class="g">☰</span>Menu</a>
     <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
@@ -55,6 +69,10 @@ requireAuth(async user=>{
   }
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid, (unreadCount)=>{
+    const badge = document.getElementById('chatTabBadge');
+    if(badge) badge.style.display = unreadCount > 0 ? 'block' : 'none';
+  });
 
   // Client chat unlocks only for orders this rider has actually been
   // confirmed on — matches "if the rider accept the client".
@@ -77,10 +95,23 @@ requireAuth(async user=>{
           if(custDoc.exists) clientName = custDoc.data().name || 'Client';
         } catch(e){ /* fall back to default label */ }
 
+        let isUnread = false;
+        try{
+          const lastMsgSnap = await db.collection('orders').doc(orderDoc.id).collection('messages')
+            .orderBy('createdAt','desc').limit(1).get();
+          if(!lastMsgSnap.empty){
+            const lastMsg = lastMsgSnap.docs[0].data();
+            if(lastMsg.senderId !== user.uid && lastMsg.createdAt){
+              isUnread = lastMsg.createdAt.toMillis() > getChatLastRead(orderDoc.id);
+            }
+          }
+        } catch(e){ /* leave unread state as false if this lookup fails */ }
+
         const card = document.createElement('a');
         card.href = `chat-thread.html?type=client&id=${orderDoc.id}`;
         card.style.textDecoration = 'none';
         card.style.color = 'inherit';
+        card.className = 'chat-row-wrap';
         card.innerHTML = `
           <div class="order-card">
             <div class="top-row">
@@ -90,6 +121,7 @@ requireAuth(async user=>{
             <div class="route">🙋 Chat with ${clientName}</div>
             <div class="route">📍 ${o.pickup.address}</div>
           </div>
+          ${isUnread ? `<span class="unread-dot"></span>` : ''}
         `;
         container.appendChild(card);
       }

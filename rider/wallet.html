@@ -58,6 +58,7 @@ requireAuth(async (user)=>{
   }
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
   watchWalletBalance('bigBalance', user.uid, (bal)=>{
     document.getElementById('lowHint').style.display = bal < LOW_BALANCE_THRESHOLD ? 'inline-block' : 'none';
   });
