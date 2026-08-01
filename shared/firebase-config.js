@@ -490,7 +490,7 @@ function watchForRiderConfirmations(riderId){
           if(!localStorage.getItem(seenKey)){
             localStorage.setItem(seenKey, '1');
             playRingtone();
-            showToast('🎉 Your delivery request was accepted! Accept it within 5 seconds.');
+            showToast('🎉 Your delivery request was accepted! Accept it within 15 seconds.');
             showBrowserNotification('Delivery Confirmed!', 'A customer accepted your request — open the app to accept or decline.');
           }
         }
