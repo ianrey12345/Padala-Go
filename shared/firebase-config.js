@@ -328,7 +328,7 @@ function showDecisionModal(orderId, order){
 
   const deadlineMs = order.riderDecisionDeadline
     ? order.riderDecisionDeadline.toMillis()
-    : Date.now() + 5000;
+    : Date.now() + 15000;
 
   const remainingNow = Math.max(0, Math.round((deadlineMs - Date.now()) / 1000));
   if(remainingNow <= 0){
