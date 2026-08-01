@@ -631,27 +631,26 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
   // Firestore delivers the current latest message immediately when this
   // listener first attaches (which happens on every fresh page load, since
   // activeMessageListeners is just an in-memory Map that resets on
-  // navigation). Without this flag, that first delivery — which could be
-  // an old message from a previous session — gets treated as brand-new
-  // and re-triggers the sound/toast/notification every time a rider page
-  // loads, even if nobody just sent anything. Alerts should only fire for
-  // messages that arrive WHILE this listener is already live.
-  let isFirstSnapshot = true;
+  // navigation). To avoid replaying an OLD message as a brand-new alert
+  // every time a rider page loads, we only alert for messages whose
+  // createdAt is after the moment this listener started listening — not
+  // simply "whichever message happened to be delivered first." That
+  // distinction matters: if a customer sends a message right as the rider's
+  // page finishes loading, that message IS genuinely new and must still
+  // alert, even though it arrives as this listener's first snapshot.
+  const listenerStartMs = Date.now();
 
   return db.collection('orders').doc(orderId).collection('messages')
     .orderBy('createdAt','desc')
     .limit(1)
     .onSnapshot(snap=>{
-      if(snap.empty){ isFirstSnapshot = false; return; }
+      if(snap.empty) return;
       const m = snap.docs[0].data();
       if(!m.createdAt) return; // still waiting on the server timestamp to resolve
-      if(m.senderId === riderId){ isFirstSnapshot = false; return; } // the rider's own message — ignore
+      if(m.senderId === riderId) return; // the rider's own message — ignore
 
       const lastRead = getChatLastRead(orderId);
       const isUnread = m.createdAt.toMillis() > lastRead;
-
-      const wasFirstSnapshot = isFirstSnapshot;
-      isFirstSnapshot = false;
 
       if(!isUnread){
         unreadOrderIds.delete(orderId);
@@ -668,17 +667,18 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
         return;
       }
 
-      // Still reflect it in the unread badge count even on first load —
-      // a genuinely unread message should still show as unread. It's only
-      // the sound/toast/browser-notification "alert" we skip on replay.
+      // Still reflect it in the unread badge count regardless of when it
+      // was sent — a genuinely unread message should still show as unread.
+      // It's only the sound/toast/browser-notification "alert" that's
+      // conditional on being sent after this listener started.
       unreadOrderIds.add(orderId);
       reportUnread();
 
-      if(wasFirstSnapshot) return; // don't alert for a pre-existing message on initial load
+      const sentWhileListening = m.createdAt.toMillis() >= listenerStartMs;
+      if(!sentWhileListening) return; // pre-existing unread message from before this page load — don't alert
 
       playRingtone();
-      const preview = m.text && m.text.length > 40 ? m.text.slice(0, 40) + '…' : (m.text || '');
-      showToast(`💬 ${m.senderName || 'Your customer'}: ${preview}`);
-      showBrowserNotification(`New message from ${m.senderName || 'your customer'}`, m.text || 'You have a new message.');
+      showToast('💬 You have a message from the customer');
+      showBrowserNotification('New Message', 'You have a message from the customer.');
     });
 }
