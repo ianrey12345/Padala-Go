@@ -586,7 +586,6 @@ function getChatLastRead(orderId){
 const activeMessageListeners = new Map(); // orderId -> unsubscribe function
 
 function watchForNewMessages(riderId, onUnreadChange){
-  console.log('[DEBUG] watchForNewMessages started for riderId:', riderId);
   requestNotificationPermission();
   const unreadOrderIds = new Set();
 
@@ -598,12 +597,10 @@ function watchForNewMessages(riderId, onUnreadChange){
     .where('riderId','==', riderId)
     .where('status','in', ['confirmed','in_progress','completed'])
     .onSnapshot(snap=>{
-      console.log('[DEBUG] watchForNewMessages query snapshot fired. Matching orders:', snap.size, snap.docs.map(d=>({id:d.id, status:d.data().status})));
       const currentOrderIds = new Set();
       snap.forEach(doc=>{
         currentOrderIds.add(doc.id);
         if(!activeMessageListeners.has(doc.id)){
-          console.log('[DEBUG] Attaching message listener for order:', doc.id);
           activeMessageListeners.set(
             doc.id,
             attachMessageListener(doc.id, riderId, unreadOrderIds, reportUnread)
@@ -649,28 +646,23 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
     .orderBy('createdAt','desc')
     .limit(1)
     .onSnapshot(snap=>{
-      console.log('[DEBUG] message listener fired for order', orderId, 'empty:', snap.empty);
       if(snap.empty) return;
       const topDoc = snap.docs[0];
       const m = topDoc.data();
-      console.log('[DEBUG] top message:', { id: topDoc.id, senderId: m.senderId, text: m.text, createdAt: m.createdAt });
-      if(!m.createdAt){ console.log('[DEBUG] skipped: createdAt not resolved yet'); return; }
+      if(!m.createdAt) return; // still waiting on the server timestamp to resolve
 
       if(baselineMsgId === undefined){
         // First delivery from this listener — record it as the baseline,
         // but only alert-worthy logic below applies to actual CHANGES.
         baselineMsgId = topDoc.id;
-        console.log('[DEBUG] baseline established:', baselineMsgId);
       }
       const isNewSinceListening = topDoc.id !== baselineMsgId;
       baselineMsgId = topDoc.id;
-      console.log('[DEBUG] isNewSinceListening:', isNewSinceListening);
 
-      if(m.senderId === riderId){ console.log('[DEBUG] skipped: this is the rider\'s own message'); return; }
+      if(m.senderId === riderId) return; // the rider's own message — ignore
 
       const lastRead = getChatLastRead(orderId);
       const isUnread = m.createdAt.toMillis() > lastRead;
-      console.log('[DEBUG] lastRead:', lastRead, 'messageTime:', m.createdAt.toMillis(), 'isUnread:', isUnread);
 
       if(!isUnread){
         unreadOrderIds.delete(orderId);
@@ -679,7 +671,6 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       }
 
       if(window.padalaGoOpenChatOrderId === orderId){
-        console.log('[DEBUG] skipped: this exact chat thread is currently open');
         // Rider already has this exact thread open — count as read,
         // don't interrupt them with a notification for it.
         markChatRead(orderId);
@@ -696,9 +687,8 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       unreadOrderIds.add(orderId);
       reportUnread();
 
-      if(!isNewSinceListening){ console.log('[DEBUG] skipped alert: pre-existing message, not new since listening'); return; }
+      if(!isNewSinceListening) return; // pre-existing unread message from before this page load — don't alert
 
-      console.log('[DEBUG] FIRING ALERT for order', orderId);
       playRingtone();
       showToast('💬 You have a message from the customer');
       showBrowserNotification('New Message', 'You have a message from the customer.');
