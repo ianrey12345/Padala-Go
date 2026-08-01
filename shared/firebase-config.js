@@ -275,7 +275,19 @@ function playRingtone(){
   } catch(e){ /* audio not available — ignore */ }
 }
 
+const toastQueue = [];
+let toastShowing = false;
+
 function showToast(message){
+  toastQueue.push(message);
+  processToastQueue();
+}
+
+function processToastQueue(){
+  if(toastShowing || toastQueue.length === 0) return;
+  toastShowing = true;
+  const message = toastQueue.shift();
+
   let toast = document.getElementById('padalaToast');
   if(!toast){
     toast = document.createElement('div');
@@ -298,7 +310,13 @@ function showToast(message){
   toast._hideTimer = setTimeout(()=>{
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(-50%) translateY(-20px)';
-  }, 5000);
+    // Give the fade-out transition time to finish before showing the next
+    // queued toast, so back-to-back messages don't look like one flicker.
+    setTimeout(()=>{
+      toastShowing = false;
+      processToastQueue();
+    }, 250);
+  }, 2500);
 }
 
 function requestNotificationPermission(){
@@ -599,6 +617,13 @@ function watchForNewMessages(riderId, onUnreadChange){
         }
       }
       reportUnread();
+    }, err=>{
+      // Without this, a missing composite index (riderId == + status in [...])
+      // fails completely silently — the listener never fires again, and the
+      // rider just sees stale/incomplete chat notifications with nothing in
+      // the UI to explain why. Log it loudly and check the console for a
+      // Firestore "create index" link.
+      console.error('watchForNewMessages: Firestore query failed — check for a missing composite index link above.', err);
     });
 }
 
