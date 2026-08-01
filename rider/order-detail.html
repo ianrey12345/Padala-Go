@@ -366,7 +366,12 @@ async function loadOrder(){
   blockingOrder = activeSnap.docs.find(d => d.id !== orderId) || null;
 
   const reqDoc = await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).get();
-  const requested = reqDoc.exists && reqDoc.data().status !== 'declined';
+  // Same rule as the Deliveries list: 'declined' (customer declined) and
+  // 'declined_by_rider' (rider missed the 15s accept window) both clear the
+  // "requested" state, so the rider can send a fresh request once the order
+  // reopens to 'pending'.
+  const reqStatus = reqDoc.exists ? reqDoc.data().status : null;
+  const requested = reqStatus !== null && reqStatus !== 'declined' && reqStatus !== 'declined_by_rider';
   setRequestButton(requested);
 }
 

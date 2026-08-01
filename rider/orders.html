@@ -250,7 +250,14 @@ function listenToPendingOrders(){
       requestedMap = {};
       await Promise.all(snap.docs.map(async doc=>{
         const reqDoc = await doc.ref.collection('requests').doc(currentUser.uid).get();
-        requestedMap[doc.id] = reqDoc.exists && reqDoc.data().status !== 'declined';
+        // A request only counts as "still active" if it wasn't declined —
+        // by the customer (status: 'declined') or by a timeout/auto-decline
+        // on the rider's own side (status: 'declined_by_rider'). Otherwise a
+        // rider who missed the 15s accept window would be stuck showing
+        // "Requested ✓" forever and could never request this order again,
+        // even after it reopens to 'pending'.
+        const s = reqDoc.exists ? reqDoc.data().status : null;
+        requestedMap[doc.id] = s !== null && s !== 'declined' && s !== 'declined_by_rider';
       }));
       renderPlaceFilters();
       updateCategoryCounts();
