@@ -653,18 +653,13 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       if(snap.empty) return;
       const topDoc = snap.docs[0];
       const m = topDoc.data();
-<<<<<<< HEAD
       console.log('[DEBUG] top message:', { id: topDoc.id, senderId: m.senderId, text: m.text, createdAt: m.createdAt });
       if(!m.createdAt){ console.log('[DEBUG] skipped: createdAt not resolved yet'); return; }
-=======
-      if(!m.createdAt) return; // still waiting on the server timestamp to resolve
->>>>>>> a2219eafa179d8bdae1fd615663813bb6285a550
 
       if(baselineMsgId === undefined){
         // First delivery from this listener — record it as the baseline,
         // but only alert-worthy logic below applies to actual CHANGES.
         baselineMsgId = topDoc.id;
-<<<<<<< HEAD
         console.log('[DEBUG] baseline established:', baselineMsgId);
       }
       const isNewSinceListening = topDoc.id !== baselineMsgId;
@@ -672,13 +667,6 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       console.log('[DEBUG] isNewSinceListening:', isNewSinceListening);
 
       if(m.senderId === riderId){ console.log('[DEBUG] skipped: this is the rider\'s own message'); return; }
-=======
-      }
-      const isNewSinceListening = topDoc.id !== baselineMsgId;
-      baselineMsgId = topDoc.id;
-
-      if(m.senderId === riderId) return; // the rider's own message — ignore
->>>>>>> a2219eafa179d8bdae1fd615663813bb6285a550
 
       const lastRead = getChatLastRead(orderId);
       const isUnread = m.createdAt.toMillis() > lastRead;
@@ -708,11 +696,7 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       unreadOrderIds.add(orderId);
       reportUnread();
 
-<<<<<<< HEAD
       if(!isNewSinceListening){ console.log('[DEBUG] skipped alert: pre-existing message, not new since listening'); return; }
-=======
-      if(!isNewSinceListening) return; // pre-existing unread message from before this page load — don't alert
->>>>>>> a2219eafa179d8bdae1fd615663813bb6285a550
 
       console.log('[DEBUG] FIRING ALERT for order', orderId);
       playRingtone();
