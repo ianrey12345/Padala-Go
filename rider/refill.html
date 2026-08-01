@@ -99,6 +99,7 @@ requireAuth(async (user)=>{
   watchWalletBalance('bigBalance', user.uid);
   listenToPendingRequests(user.uid);
   watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
 });
 
 const chipRow = document.getElementById('chipRow');

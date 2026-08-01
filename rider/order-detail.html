@@ -216,6 +216,7 @@ requireAuth(user=>{
   // — previously this only fired on orders.html / current.html, meaning a
   // rider had to leave this page to see it.
   watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
 });
 
 initMap();

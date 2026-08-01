@@ -71,6 +71,7 @@ requireAuth(async (user)=>{
   loadCompletedOrders(user.uid);
   loadWalletTransactions(user.uid);
   watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
 });
 
 async function loadCompletedOrders(riderId){

@@ -54,6 +54,7 @@ requireAuth(async user=>{
     return;
   }
   watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
 
   // Client chat unlocks only for orders this rider has actually been
   // confirmed on — matches "if the rider accept the client".

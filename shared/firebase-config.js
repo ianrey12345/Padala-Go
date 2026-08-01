@@ -411,6 +411,69 @@ function declineConfirmedOrder(orderId){
   }
 }
 
+function dismissDecisionModal(orderId){
+  if(activeDecisionOrderId !== orderId) return;
+  const existing = document.getElementById('padalaDecisionModal');
+  if(existing) existing.remove();
+  activeDecisionOrderId = null;
+}
+
+/* ---------------------------------------------------------
+   Rider "order cancelled by customer" alert. Same popup
+   treatment as the Accept/Decline countdown above, but this
+   one is just an acknowledgement — there's nothing left for
+   the rider to decide once the customer has already cancelled.
+   --------------------------------------------------------- */
+function showCancelledModal(orderId, order){
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:10000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  `;
+  overlay.innerHTML = `
+    <div style="background:#fff; border-radius:18px; padding:26px 24px; max-width:360px; width:100%; text-align:center; font-family:'Inter',sans-serif;">
+      <div style="font-size:34px; margin-bottom:6px;">🚫</div>
+      <div style="font-weight:700; font-size:17px; color:#082F2B; margin-bottom:4px;">Order Cancelled</div>
+      <div style="font-size:13.5px; color:#586866; margin-bottom:18px; line-height:1.4;">
+        The customer cancelled this delivery:<br>📍 ${order.pickup.address}<br>🎯 ${order.dropoff.address}
+      </div>
+      <button id="padalaCancelAckBtn" style="width:100%; padding:13px; border-radius:12px; border:none; background:#0C4A45; color:#fff; font-weight:700; font-size:14px;">OK, Got It</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#padalaCancelAckBtn').addEventListener('click', ()=> overlay.remove());
+}
+
+/* Call once, after confirming the signed-in user is a rider, from any
+   rider page — same as watchForRiderConfirmations. Fires a sound + toast
+   + browser notification + popup the moment a delivery the rider was on
+   gets cancelled by the customer. Only fires for cancellations the
+   customer made (cancelledBy: 'customer') — a rider cancelling their own
+   order shouldn't pop up a notice to themselves. */
+function watchForOrderCancellations(riderId){
+  requestNotificationPermission();
+  db.collection('orders')
+    .where('riderId','==', riderId)
+    .where('status','==','cancelled')
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type !== 'added') return; // the moment status flips into 'cancelled', this query sees it as newly-added
+        const o = change.doc.data();
+        if(o.cancelledBy !== 'customer') return;
+
+        const seenKey = 'padalaGoSeenCancel_' + change.doc.id;
+        if(localStorage.getItem(seenKey)) return;
+        localStorage.setItem(seenKey, '1');
+
+        dismissDecisionModal(change.doc.id); // in case the 15s accept/decline popup was still showing
+        playRingtone();
+        showToast('🚫 A customer cancelled their delivery.');
+        showBrowserNotification('Order Cancelled', 'A customer cancelled a delivery you were assigned to.');
+        showCancelledModal(change.doc.id, o);
+      });
+    });
+}
+
 /* Call once, after confirming the signed-in user is a rider, from any
    rider page. Fires a sound + toast + browser notification the moment
    one of the rider's requests gets confirmed, and shows the 15-second

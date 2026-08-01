@@ -244,6 +244,7 @@ requireAuth(async (user)=>{
   });
   listenToActiveOrder();
   watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
 });
 
 const riderIcon = L.divIcon({

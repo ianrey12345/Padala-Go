@@ -57,6 +57,7 @@ requireAuth(async (user)=>{
   document.getElementById('riderName').textContent = doc.data().name || 'Rider';
   watchWalletBalance('walletBalanceRow', user.uid);
   watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
 });
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
