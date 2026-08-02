@@ -402,7 +402,12 @@ function showRiderCancelModal(orderId, o){
     } catch(err){
       btn.disabled = false;
       btn.textContent = 'Cancel Delivery';
-      alert("Couldn't cancel this delivery. Please try again.");
+      console.error('Rider cancel-order failed:', err);
+      // Surface the real Firebase error (e.g. "Missing or insufficient
+      // permissions") instead of a generic message — makes it obvious
+      // when this is a Firestore security-rules issue rather than a
+      // network blip.
+      alert(err && err.message ? `Couldn't cancel this delivery: ${err.message}` : "Couldn't cancel this delivery. Please try again.");
     }
   });
 }
