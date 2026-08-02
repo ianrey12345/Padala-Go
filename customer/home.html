@@ -51,6 +51,9 @@
 <script src="../shared/firebase-config.js"></script>
 <script>
 requireAuth(async (user)=>{
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
   try{
     const doc = await db.collection('users').doc(user.uid).get();
     if(doc.exists){

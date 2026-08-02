@@ -34,6 +34,9 @@
 function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
 
 requireAuth(user=>{
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
   // Chat threads only exist for orders where a rider has actually been
   // confirmed — that's what "the booking is approved" means here.
   db.collection('orders')

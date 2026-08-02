@@ -110,7 +110,12 @@ const serviceType = params.get('service') === 'padala_pabili' ? 'padala_pabili' 
 document.getElementById('serviceTitle').textContent = serviceType === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery';
 
 let currentUser = null;
-requireAuth(user=>{ currentUser = user; });
+requireAuth(user=>{
+  currentUser = user;
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
+});
 
 let map;
 let pickupMarker = null, dropoffMarker = null;

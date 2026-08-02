@@ -99,6 +99,9 @@ let currentOrderData = null;
 
 requireAuth(user=>{
   currentUser = user;
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
   if(!orderId){ window.location.href = "my-orders.html"; return; }
   listenToOrder();
 });

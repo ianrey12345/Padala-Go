@@ -694,3 +694,113 @@ function attachMessageListener(orderId, riderId, unreadOrderIds, reportUnread){
       showBrowserNotification('New Message', 'You have a message from the customer.');
     });
 }
+
+/* ---------------------------------------------------------
+   Customer alert helpers — sound + toast + browser notification,
+   same treatment as the rider-side alerts above. Call each of
+   these once, from any customer page, right after requireAuth
+   confirms the signed-in user (see home.html / my-orders.html /
+   chat.html / order-status.html / order.html for wiring).
+
+   Each fires exactly once per event thanks to a localStorage
+   "seen" key, so reloading a page or having multiple customer
+   tabs open doesn't replay the same alert.
+   --------------------------------------------------------- */
+
+/* 1) A rider sends a request on one of the customer's still-pending
+   orders. Requests live in a subcollection per order, so this keeps
+   a listener attached per pending order (same attach/detach pattern
+   as watchForNewMessages) and alerts on each newly-added pending
+   request. */
+const activeCustomerRequestListeners = new Map(); // orderId -> unsubscribe
+
+function watchForNewRequests(customerId){
+  requestNotificationPermission();
+  db.collection('orders')
+    .where('customerId','==', customerId)
+    .where('status','==','pending')
+    .onSnapshot(snap=>{
+      const currentOrderIds = new Set();
+      snap.forEach(doc=>{
+        currentOrderIds.add(doc.id);
+        if(!activeCustomerRequestListeners.has(doc.id)){
+          activeCustomerRequestListeners.set(doc.id, attachRequestListener(doc.id));
+        }
+      });
+      // Order left the "pending" query (confirmed/cancelled/etc.) —
+      // stop listening to its requests so listeners don't leak.
+      for(const orderId of Array.from(activeCustomerRequestListeners.keys())){
+        if(!currentOrderIds.has(orderId)){
+          activeCustomerRequestListeners.get(orderId)();
+          activeCustomerRequestListeners.delete(orderId);
+        }
+      }
+    }, err=>{
+      console.error('watchForNewRequests: Firestore query failed.', err);
+    });
+}
+
+function attachRequestListener(orderId){
+  return db.collection('orders').doc(orderId).collection('requests')
+    .where('status','==','pending')
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type !== 'added') return;
+        const seenKey = 'padalaGoSeenRequest_' + change.doc.id;
+        if(localStorage.getItem(seenKey)) return;
+        localStorage.setItem(seenKey, '1');
+
+        const r = change.doc.data();
+        const riderName = r.riderName || 'A rider';
+        playRingtone();
+        showToast(`🏍️ ${riderName} wants to deliver your order`);
+        showBrowserNotification('New Delivery Request', `${riderName} requested to deliver your order.`);
+      });
+    });
+}
+
+/* 2) The confirmed rider marks themselves as arrived at the pickup
+   point (arrivedAtPickup flips to true on the order doc). */
+function watchForRiderArrival(customerId){
+  requestNotificationPermission();
+  db.collection('orders')
+    .where('customerId','==', customerId)
+    .where('status','==','confirmed')
+    .where('arrivedAtPickup','==', true)
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type !== 'added') return; // the moment arrivedAtPickup flips true, this query sees it as newly-added
+        const seenKey = 'padalaGoSeenArrival_' + change.doc.id;
+        if(localStorage.getItem(seenKey)) return;
+        localStorage.setItem(seenKey, '1');
+
+        playRingtone();
+        showToast('🛵 Your rider has arrived at the pickup point');
+        showBrowserNotification('Rider Arrived', 'Your rider has arrived at the pickup point.');
+      });
+    }, err=>{
+      console.error('watchForRiderArrival: Firestore query failed.', err);
+    });
+}
+
+/* 3) The order is marked completed (rider finishes the delivery). */
+function watchForOrderCompletion(customerId){
+  requestNotificationPermission();
+  db.collection('orders')
+    .where('customerId','==', customerId)
+    .where('status','==','completed')
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type !== 'added') return;
+        const seenKey = 'padalaGoSeenComplete_' + change.doc.id;
+        if(localStorage.getItem(seenKey)) return;
+        localStorage.setItem(seenKey, '1');
+
+        playRingtone();
+        showToast('✅ Your delivery has been completed');
+        showBrowserNotification('Delivery Completed', 'Your order has been marked as completed.');
+      });
+    }, err=>{
+      console.error('watchForOrderCompletion: Firestore query failed.', err);
+    });
+}

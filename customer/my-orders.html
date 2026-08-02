@@ -58,6 +58,9 @@ function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bi
 const CANCELLABLE_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
 requireAuth(user=>{
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
   db.collection('orders')
     .where('customerId','==', user.uid)
     .orderBy('createdAt','desc')
