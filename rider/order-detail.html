@@ -98,6 +98,8 @@
       </div>
     </div>
 
+    <div class="route" id="clientNameRow" style="display:none; margin-bottom:14px;">🙋 Client: <b id="clientNameVal" style="color:var(--ink);"></b></div>
+
     <div class="msg-box" id="msgBox" style="display:none;">
       <div class="msg-text" id="msgText"></div>
       <div class="msg-from">Client<br><b id="msgFrom"></b></div>
@@ -347,15 +349,18 @@ async function loadOrder(){
 
   document.getElementById('statDistance').textContent = o.distanceKm + ' km';
 
+  let clientName = 'Customer';
+  try{
+    const custDoc = await db.collection('users').doc(o.customerId).get();
+    clientName = custDoc.exists ? (custDoc.data().name || 'Customer') : 'Customer';
+  } catch(e){ /* keep default label */ }
+  document.getElementById('clientNameVal').textContent = clientName;
+  document.getElementById('clientNameRow').style.display = 'block';
+
   if(o.notes){
     document.getElementById('msgBox').style.display = 'block';
     document.getElementById('msgText').textContent = o.notes;
-    try{
-      const custDoc = await db.collection('users').doc(o.customerId).get();
-      document.getElementById('msgFrom').textContent = custDoc.exists ? custDoc.data().name : 'Customer';
-    } catch(e){
-      document.getElementById('msgFrom').textContent = 'Customer';
-    }
+    document.getElementById('msgFrom').textContent = clientName;
   }
 
   if(map) updateVisuals();
