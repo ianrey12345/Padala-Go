@@ -23,6 +23,38 @@
   }
   .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
   .wallet-pill .warn{ font-size:13px; }
+
+  .act-wrap{ position:relative; margin-top:14px; }
+  .act-btn{
+    width:auto; padding:11px 22px; display:inline-flex; align-items:center; gap:6px;
+  }
+  .act-btn .caret{ font-size:11px; transition:transform .15s ease; }
+  .act-btn.open .caret{ transform:rotate(180deg); }
+  .act-menu{
+    position:absolute; left:0; bottom:calc(100% + 8px); min-width:200px;
+    background:#fff; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,0.18);
+    border:1px solid var(--line); overflow:hidden; z-index:20; display:none;
+  }
+  .act-menu.show{ display:block; }
+  .act-menu button{
+    width:100%; text-align:left; padding:13px 16px; border:none; background:none;
+    font-family:'Inter'; font-size:14px; font-weight:600; color:var(--ink); cursor:pointer;
+    display:flex; align-items:center; gap:10px;
+  }
+  .act-menu button:not(:last-child){ border-bottom:1px solid var(--line); }
+  .act-menu button:hover{ background:var(--cream); }
+  .act-menu button.danger{ color:var(--red); }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:18px; padding:26px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal-card .note{ font-size:13px; color:#8A8178; margin:8px 0 20px; line-height:1.4; }
+  .modal-actions{ display:flex; gap:10px; }
 </style>
 </head>
 <body>
@@ -91,6 +123,8 @@
   </div>
 </div>
 
+<div id="modalRoot"></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -113,6 +147,9 @@ function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bi
 let etaDeadlineMs = null;
 let etaCountdownTimer = null;
 let currentActiveOrder = null;
+let currentActiveOrderId = null;
+let activeCustomerPhone = null;
+let activeCustomerName = null;
 
 function startEtaCountdown(){
   if(etaCountdownTimer) return; // already ticking — recalibration just moved the deadline
@@ -211,11 +248,16 @@ function listenToActiveDelivery(){
         document.getElementById('viewMapBtn').style.display = 'none';
         stopEtaCountdown();
         currentActiveOrder = null;
+        currentActiveOrderId = null;
+        activeCustomerPhone = null;
+        activeCustomerName = null;
+        activeCustomerOrderIdFetched = null;
         return;
       }
       const doc = snap.docs[0];
       const o = doc.data();
       section.style.display = 'block';
+      currentActiveOrderId = doc.id;
       document.getElementById('activeCard').innerHTML = `
         <a href="map.html" style="text-decoration:none; color:inherit;">
           <div class="order-card">
@@ -230,10 +272,117 @@ function listenToActiveDelivery(){
             <div class="hint" style="margin-top:10px;">Tap for map &amp; directions →</div>
           </div>
         </a>
+        <div class="act-wrap">
+          <button type="button" class="btn btn-outline act-btn" id="actBtn">Act <span class="caret">▾</span></button>
+          <div class="act-menu" id="actMenu">
+            <button type="button" id="actCallBtn">📞 Call Customer</button>
+            <button type="button" class="danger" id="actCancelBtn">🚫 Cancel Order</button>
+          </div>
+        </div>
       `;
+
+      wireActMenu(doc.id, o);
+      // Fetch the customer's phone once per order (not on every snapshot
+      // tick) — cached in activeCustomerPhone/activeCustomerName for the
+      // Call action.
+      if(activeCustomerOrderIdFetched !== doc.id){
+        fetchActiveCustomerContact(o.customerId, doc.id);
+      }
 
       updateEtaDisplay(o);
     });
+}
+
+let activeCustomerOrderIdFetched = null;
+
+async function fetchActiveCustomerContact(customerId, orderId){
+  activeCustomerOrderIdFetched = orderId;
+  try{
+    const custDoc = await db.collection('users').doc(customerId).get();
+    if(custDoc.exists){
+      activeCustomerPhone = custDoc.data().phone || null;
+      activeCustomerName = custDoc.data().name || 'Customer';
+    }
+  } catch(e){ /* Call Customer will show an error if this failed */ }
+}
+
+function wireActMenu(orderId, o){
+  const actBtn = document.getElementById('actBtn');
+  const actMenu = document.getElementById('actMenu');
+  if(!actBtn || !actMenu) return;
+
+  actBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    const willShow = !actMenu.classList.contains('show');
+    actMenu.classList.toggle('show', willShow);
+    actBtn.classList.toggle('open', willShow);
+  });
+
+  document.getElementById('actCallBtn').addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    closeActMenu();
+    if(activeCustomerPhone){
+      window.location.href = `tel:${activeCustomerPhone}`;
+    } else {
+      alert("This customer doesn't have a phone number on file.");
+    }
+  });
+
+  document.getElementById('actCancelBtn').addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    closeActMenu();
+    showRiderCancelModal(orderId, o);
+  });
+}
+
+// Attached once at page load — closes the Act dropdown on any outside tap,
+// regardless of how many times the card (and its buttons) get re-rendered.
+document.addEventListener('click', closeActMenu);
+
+function closeActMenu(){
+  const actBtn = document.getElementById('actBtn');
+  const actMenu = document.getElementById('actMenu');
+  if(actMenu) actMenu.classList.remove('show');
+  if(actBtn) actBtn.classList.remove('open');
+}
+
+function showRiderCancelModal(orderId, o){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div style="font-size:30px;">🚫</div>
+      <div style="font-weight:700; font-size:16px; color:var(--teal-dark); margin-top:6px;">Cancel this delivery?</div>
+      <div class="note">The customer will see this delivery marked as cancelled. This can't be undone.</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="riderModalKeepBtn">Keep Delivery</button>
+        <button class="btn btn-primary" id="riderModalCancelBtn" style="background:var(--red);">Cancel Delivery</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').appendChild(overlay);
+
+  overlay.querySelector('#riderModalKeepBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#riderModalCancelBtn').addEventListener('click', async ()=>{
+    const btn = overlay.querySelector('#riderModalCancelBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try{
+      await db.collection('orders').doc(orderId).update({
+        status: 'cancelled',
+        cancelledAt: firebase.firestore.FieldValue.serverTimestamp(),
+        cancelledBy: 'rider'
+      });
+      overlay.remove();
+    } catch(err){
+      btn.disabled = false;
+      btn.textContent = 'Cancel Delivery';
+      alert("Couldn't cancel this delivery. Please try again.");
+    }
+  });
 }
 
 let allPastOrders = [];
