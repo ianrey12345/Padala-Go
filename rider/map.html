@@ -113,6 +113,7 @@ let orderRef = null;
 let orderData = null;
 let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
 let hasCenteredOnUser = false;
+let boundsFitForOrderId = null; // only auto-frame the route once per order, not on every GPS tick
 
 const ASSUMED_SPEED_KMH = 25; // used to convert remaining road distance into an ETA
 
@@ -400,13 +401,17 @@ async function updateRouteVisuals(riderPos){
   etaDeadlineMs = Date.now() + mins * 60000;
   startEtaCountdown();
 
-  const boundsPoints = [
-    [orderData.pickup.lat, orderData.pickup.lng],
-    [orderData.dropoff.lat, orderData.dropoff.lng],
-    [riderPos.lat, riderPos.lng]
-  ];
-  // Leave extra room at the bottom so the floating panel doesn't cover the route.
-  map.fitBounds(boundsPoints, { paddingTopLeft: [60, 60], paddingBottomRight: [60, 320] });
+  // Frame the route once when we first pick it up, so the rider starts out
+  // seeing the whole trip — after that, zoom/pan is entirely manual.
+  if(boundsFitForOrderId !== orderId){
+    const boundsPoints = [
+      [orderData.pickup.lat, orderData.pickup.lng],
+      [orderData.dropoff.lat, orderData.dropoff.lng],
+      [riderPos.lat, riderPos.lng]
+    ];
+    map.fitBounds(boundsPoints, { paddingTopLeft: [60, 60], paddingBottomRight: [60, 320] });
+    boundsFitForOrderId = orderId;
+  }
 }
 
 function listenToActiveOrder(){
@@ -438,6 +443,7 @@ function showEmptyState(){
   document.getElementById('bottomPanel').style.display = 'none';
   stopEtaCountdown();
   orderId = null; orderRef = null; orderData = null;
+  boundsFitForOrderId = null;
 }
 
 function showActiveState(){
