@@ -238,6 +238,16 @@ function watchWalletBalance(elId, riderId, onUpdate){
   });
 }
 
+/* Gate for any action that lets a rider take on a new delivery (requesting
+   a pending order, accepting a confirmed one, etc). A negative balance
+   means the rider owes commission from a past delivery — they need to
+   refill before taking on more. Returns { allowed, balance }. */
+async function checkRiderCanTakeOrders(riderId){
+  const riderSnap = await db.collection('users').doc(riderId).get();
+  const balance = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
+  return { allowed: balance >= 0, balance };
+}
+
 function timeAgo(ts){
   if(!ts) return "";
   const secs = Math.floor((Date.now() - ts.toDate().getTime())/1000);
@@ -397,7 +407,29 @@ function showDecisionModal(orderId, order){
     activeDecisionOrderId = null;
   }
 
-  overlay.querySelector('#padalaAcceptBtn').addEventListener('click', ()=>{
+  overlay.querySelector('#padalaAcceptBtn').addEventListener('click', async ()=>{
+    const acceptBtn = overlay.querySelector('#padalaAcceptBtn');
+    const declineBtn = overlay.querySelector('#padalaDeclineBtn');
+    acceptBtn.disabled = true;
+    declineBtn.disabled = true;
+    acceptBtn.textContent = 'Checking wallet…';
+
+    // A negative (or zero-and-below) wallet balance means the rider owes
+    // commission from a past delivery — block them from taking on a new
+    // one until they refill, rather than letting the debt grow further.
+    const riderId = auth.currentUser ? auth.currentUser.uid : null;
+    let gate = { allowed: true, balance: 0 };
+    try{
+      gate = await checkRiderCanTakeOrders(riderId);
+    } catch(e){ /* if this fails, fall through and allow — don't hard-block on a network blip */ }
+
+    if(!gate.allowed){
+      cleanup();
+      showToast(`⚠️ Your wallet balance is ${fmtPeso(gate.balance)}. Refill your wallet before accepting new deliveries.`);
+      declineConfirmedOrder(orderId);
+      return;
+    }
+
     cleanup();
     db.collection('orders').doc(orderId).update({ riderAccepted: true }).then(()=>{
       // Send the rider straight into the Map tab so their live location
