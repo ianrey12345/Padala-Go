@@ -9,13 +9,18 @@
 <style>
   html, body{ height:100%; }
   .app-shell{ height:100vh; min-height:100vh; overflow:hidden; }
+  @supports (height: 100dvh){
+    .app-shell{ height:100dvh; min-height:100dvh; }
+  }
 
-  .map-stage{ position:relative; flex:1; min-height:0; }
-  #map{ position:absolute; inset:0; z-index:0; }
+  .map-stage{ position:relative; flex:1; min-height:300px; }
+  #map{ position:absolute; inset:0; z-index:0; min-height:100%; }
 
   /* Leaflet's own zoom control, nudged to sit clear of the notch/status bar */
   .leaflet-top.leaflet-right{ top:calc(14px + env(safe-area-inset-top)); right:14px; }
-  .leaflet-control-zoom a{ width:38px !important; height:38px !important; line-height:38px !important; font-size:18px !important; }
+  .leaflet-bar a{ width:38px !important; height:38px !important; line-height:38px !important; font-size:16px !important; }
+  .leaflet-control-zoom a{ font-size:18px !important; }
+  .recenter-control a{ display:flex; align-items:center; justify-content:center; }
 
   .floating-wallet{
     position:absolute; top:calc(14px + env(safe-area-inset-top)); left:14px; z-index:500;
@@ -85,8 +90,6 @@
       </div>
       <div class="hint" id="locationWarning" style="display:none; color:var(--red);"></div>
       <div class="eta-pill" id="etaPill" style="display:none;"></div>
-
-      <div class="order-card" style="margin-top:12px;" id="orderCard"></div>
 
       <button type="button" class="btn btn-amber" id="actionBtn" style="margin-top:12px; display:none;"></button>
     </div>
@@ -278,10 +281,49 @@ function ensureMap(){
   // so it lands clear of the wallet pill and matches a standard mobile-map layout.
   map = L.map('map', { zoomControl: false }).setView([14.6760, 121.0437], 13);
   L.control.zoom({ position: 'topright' }).addTo(map);
+
+  // Recenter button, stacked right below the zoom controls — jumps back
+  // to the rider's own live location whenever they've panned away.
+  const RecenterControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function(){
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control recenter-control');
+      const btn = L.DomUtil.create('a', '', container);
+      btn.href = '#';
+      btn.title = 'Recenter on my location';
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('aria-label', 'Recenter on my location');
+      btn.innerHTML = '🧭';
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(btn, 'click', (e)=>{
+        L.DomEvent.preventDefault(e);
+        if(riderMarker){
+          map.setView(riderMarker.getLatLng(), Math.max(map.getZoom(), 15));
+        } else if(navigator.geolocation){
+          navigator.geolocation.getCurrentPosition(pos=>{
+            map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+          });
+        }
+      });
+      return container;
+    }
+  });
+  map.addControl(new RecenterControl());
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
+
+  // Leaflet measures its container at creation time — if the surrounding
+  // flex layout (or a font/webfont swap) hasn't fully settled yet, it can
+  // size itself off a too-small reading and only render tiles for that
+  // smaller area, leaving blank space below. Re-measuring after layout
+  // settles, and again on any resize, keeps the map filling its container.
+  requestAnimationFrame(()=> map.invalidateSize());
+  setTimeout(()=> map.invalidateSize(), 300);
+  window.addEventListener('resize', ()=> map.invalidateSize());
+  window.addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 200));
+
   startGeolocation();
 }
 
@@ -428,7 +470,6 @@ function listenToActiveOrder(){
       orderRef = doc.ref;
       orderData = doc.data();
       showActiveState();
-      renderOrderCard();
       renderStage();
       if(map && riderMarker){
         updateRouteVisuals(riderMarker.getLatLng());
@@ -449,19 +490,6 @@ function showEmptyState(){
 function showActiveState(){
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('bottomPanel').style.display = 'block';
-}
-
-function renderOrderCard(){
-  const o = orderData;
-  document.getElementById('orderCard').innerHTML = `
-    <div class="top-row">
-      <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-      <span class="fare-tag">${fmtPeso(o.fare)}</span>
-    </div>
-    <div class="route">📍 ${o.pickup.address}</div>
-    <div class="route">🎯 ${o.dropoff.address}</div>
-    ${o.notes ? `<div class="notes">"${escapeHtml(o.notes)}"</div>` : ''}
-  `;
 }
 
 function escapeHtml(str){
