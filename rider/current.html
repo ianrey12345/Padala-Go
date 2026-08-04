@@ -28,9 +28,22 @@
   .client-row{ font-size:13px; color:#586866; margin:4px 0 10px; }
   .client-row b{ color:var(--ink); }
 
-  .act-wrap{ position:relative; margin-top:14px; }
+  .stage-banner{
+    background:var(--paper); border-radius:14px; padding:14px 16px; margin-top:14px;
+    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
+  }
+  .stage-banner .glyph{font-size:22px;}
+  .stage-banner .txt{font-size:13.5px; font-weight:600; color:var(--teal-dark);}
+  .stage-banner .sub{font-size:12px; color:#8A8178; margin-top:1px;}
+
+  .act-row{ display:flex; align-items:stretch; gap:10px; margin-top:14px; }
+  .act-row .navigate-btn{
+    flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:11px 16px; text-decoration:none;
+  }
+  .act-wrap{ position:relative; flex-shrink:0; }
   .act-btn{
-    width:auto; padding:11px 22px; display:inline-flex; align-items:center; gap:6px;
+    width:auto; height:100%; padding:11px 22px; display:inline-flex; align-items:center; gap:6px;
   }
   .act-btn .caret{ font-size:11px; transition:transform .15s ease; }
   .act-btn.open .caret{ transform:rotate(180deg); }
@@ -194,6 +207,17 @@ function tickEtaCountdown(){
   }
 }
 
+function stageInfo(o){
+  if(o.status === 'confirmed' && !o.arrivedAtPickup){
+    return { text: "Heading to pickup point", sub: "Follow the route to the pickup point." };
+  } else if(o.status === 'confirmed' && o.arrivedAtPickup){
+    return { text: "Arrived at pickup point", sub: "Customer has been notified. Once you have the item, mark it picked up." };
+  } else if(o.status === 'in_progress'){
+    return { text: "On the way to drop-off", sub: "Follow the route to the drop-off point." };
+  }
+  return { text: "Loading order…", sub: "" };
+}
+
 function updateEtaDisplay(o){
   currentActiveOrder = o;
   document.getElementById('viewMapBtn').style.display = 'inline-flex';
@@ -271,6 +295,11 @@ function listenToActiveDelivery(){
       const o = doc.data();
       section.style.display = 'block';
       currentActiveOrderId = doc.id;
+
+      const dest = o.status === 'in_progress' ? o.dropoff : o.pickup;
+      const navHref = dest ? `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}&travelmode=driving` : '#';
+      const stage = stageInfo(o);
+
       document.getElementById('activeCard').innerHTML = `
         <a href="map.html" style="text-decoration:none; color:inherit;">
           <div class="order-card">
@@ -286,11 +315,23 @@ function listenToActiveDelivery(){
             <div class="hint" style="margin-top:10px;">Tap for map &amp; directions →</div>
           </div>
         </a>
-        <div class="act-wrap">
-          <button type="button" class="btn btn-outline act-btn" id="actBtn">Act <span class="caret">▾</span></button>
-          <div class="act-menu" id="actMenu">
-            <button type="button" id="actCallBtn">📞 Call Customer</button>
-            <button type="button" class="danger" id="actCancelBtn">🚫 Cancel Order</button>
+
+        <div class="stage-banner">
+          <div class="glyph">📍</div>
+          <div>
+            <div class="txt">${stage.text}</div>
+            <div class="sub">${stage.sub}</div>
+          </div>
+        </div>
+
+        <div class="act-row">
+          <a href="${navHref}" target="_blank" class="btn btn-primary navigate-btn">🧭 Turn-by-Turn</a>
+          <div class="act-wrap">
+            <button type="button" class="btn btn-outline act-btn" id="actBtn">Act <span class="caret">▾</span></button>
+            <div class="act-menu" id="actMenu">
+              <button type="button" id="actCallBtn">📞 Call Customer</button>
+              <button type="button" class="danger" id="actCancelBtn">🚫 Cancel Order</button>
+            </div>
           </div>
         </div>
       `;

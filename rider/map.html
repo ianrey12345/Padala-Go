@@ -16,13 +16,6 @@
   }
   .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
   .wallet-pill .warn{ font-size:13px; }
-  .stage-banner{
-    background:var(--paper); border-radius:14px; padding:14px 16px; margin-top:14px;
-    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
-  }
-  .stage-banner .glyph{font-size:22px;}
-  .stage-banner .txt{font-size:13.5px; font-weight:600; color:var(--teal-dark);}
-  .stage-banner .sub{font-size:12px; color:#8A8178; margin-top:1px;}
   .eta-pill{
     display:inline-block; background:var(--cream); color:var(--teal-dark);
     font-family:'Space Mono'; font-size:12.5px; padding:4px 10px; border-radius:20px; margin-top:8px;
@@ -67,18 +60,6 @@
       <div class="hint" id="locationWarning" style="display:none; color:var(--red);"></div>
       <div class="eta-pill" id="etaPill" style="display:none;"></div>
       <div class="hint">Route follows real roads via OpenStreetMap routing — actual travel time may still vary with traffic.</div>
-
-      <a href="#" class="btn btn-primary" id="navigateBtn" style="margin-top:12px; display:none; text-decoration:none;">
-        🧭 Open Turn-by-Turn Directions
-      </a>
-
-      <div class="stage-banner" id="stageBanner">
-        <div class="glyph">📍</div>
-        <div>
-          <div class="txt" id="stageText">Loading order…</div>
-          <div class="sub" id="stageSub"></div>
-        </div>
-      </div>
 
       <div class="order-card" style="margin-top:14px;" id="orderCard"></div>
 
@@ -389,15 +370,6 @@ async function updateRouteVisuals(riderPos){
     [riderPos.lat, riderPos.lng]
   ];
   map.fitBounds(boundsPoints, { padding: [60, 60] });
-  updateNavigateLink(dest);
-}
-
-function updateNavigateLink(dest){
-  const navBtn = document.getElementById('navigateBtn');
-  const destParam = `${dest.lat},${dest.lng}`;
-  navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${destParam}&travelmode=driving`;
-  navBtn.target = "_blank";
-  navBtn.style.display = 'block';
 }
 
 function listenToActiveOrder(){
@@ -460,15 +432,11 @@ function escapeHtml(str){
 
 function renderStage(){
   const o = orderData;
-  const stageText = document.getElementById('stageText');
-  const stageSub = document.getElementById('stageSub');
   const actionBtn = document.getElementById('actionBtn');
   actionBtn.style.display = 'block';
   actionBtn.onclick = null;
 
   if(o.status === 'confirmed' && !o.arrivedAtPickup){
-    stageText.textContent = "Heading to pickup point";
-    stageSub.textContent = "Follow the blue route to the pickup point.";
     actionBtn.textContent = "I've Arrived at Pickup";
     actionBtn.className = "btn btn-amber";
     actionBtn.onclick = ()=> orderRef.update({
@@ -476,14 +444,10 @@ function renderStage(){
       arrivedAtPickupAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   } else if(o.status === 'confirmed' && o.arrivedAtPickup){
-    stageText.textContent = "Arrived at pickup point";
-    stageSub.textContent = "Customer has been notified. Once you have the item, mark it picked up.";
     actionBtn.textContent = "Lets Go!";
     actionBtn.className = "btn btn-primary";
     actionBtn.onclick = ()=> orderRef.update({ status: 'in_progress' });
   } else if(o.status === 'in_progress'){
-    stageText.textContent = "On the way to drop-off";
-    stageSub.textContent = "Follow the blue route to the drop-off point.";
     actionBtn.textContent = "Mark Delivered";
     actionBtn.className = "btn btn-amber";
     actionBtn.onclick = async ()=>{
