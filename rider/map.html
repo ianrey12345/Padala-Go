@@ -7,42 +7,68 @@
 <link rel="stylesheet" href="../shared/styles.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  #map{ height:38vh; min-height:230px; }
-  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
-  .wallet-pill{
-    flex-shrink:0; display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.15);
-    color:#fff; font-family:'Space Mono'; font-weight:700; font-size:14px;
-    padding:8px 12px; border-radius:14px; text-decoration:none; margin-top:2px;
+  html, body{ height:100%; }
+  .app-shell{ height:100vh; min-height:100vh; overflow:hidden; }
+
+  .map-stage{ position:relative; flex:1; min-height:0; }
+  #map{ position:absolute; inset:0; z-index:0; }
+
+  /* Leaflet's own zoom control, nudged to sit clear of the notch/status bar */
+  .leaflet-top.leaflet-right{ top:calc(14px + env(safe-area-inset-top)); right:14px; }
+  .leaflet-control-zoom a{ width:38px !important; height:38px !important; line-height:38px !important; font-size:18px !important; }
+
+  .floating-wallet{
+    position:absolute; top:calc(14px + env(safe-area-inset-top)); left:14px; z-index:500;
   }
-  .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
+  .wallet-pill{
+    flex-shrink:0; display:flex; align-items:center; gap:6px;
+    background:var(--teal-dark); color:#fff; font-family:'Space Mono'; font-weight:700; font-size:14px;
+    padding:9px 13px; border-radius:14px; text-decoration:none; box-shadow:0 4px 14px rgba(0,0,0,0.25);
+  }
+  .wallet-pill.low{ background:var(--amber); color:var(--teal-dark); }
   .wallet-pill .warn{ font-size:13px; }
+
+  .map-empty-overlay{
+    position:absolute; inset:0; z-index:400; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:24px;
+    background:rgba(251,248,243,0.88); color:#8A8178;
+  }
+  .map-empty-overlay .glyph{ font-size:34px; margin-bottom:10px; }
+
+  .map-bottom-panel{
+    position:absolute; left:0; right:0; bottom:0; z-index:450;
+    background:var(--paper); border-radius:20px 20px 0 0;
+    box-shadow:0 -6px 24px rgba(0,0,0,0.16);
+    padding:14px 16px calc(16px + env(safe-area-inset-bottom));
+    max-height:44vh; overflow-y:auto;
+  }
+  .panel-handle{
+    width:36px; height:4px; border-radius:3px; background:var(--line);
+    margin:0 auto 10px;
+  }
+
   .eta-pill{
     display:inline-block; background:var(--cream); color:var(--teal-dark);
     font-family:'Space Mono'; font-size:12.5px; padding:4px 10px; border-radius:20px; margin-top:8px;
   }
-  .map-legend{display:flex; gap:16px; font-size:12.5px; margin-top:10px; color:#586866; flex-wrap:wrap;}
+  .map-legend{display:flex; gap:16px; font-size:12.5px; margin-top:2px; color:#586866; flex-wrap:wrap;}
   .legend-line{ display:inline-block; width:18px; height:4px; border-radius:2px; vertical-align:middle; }
 </style>
 </head>
 <body>
 <div class="app-shell">
-  <div class="topbar">
-    <div class="topbar-row">
-      <div>
-        <div class="eyebrow">Padala Go Rider</div>
-        <h1>Map</h1>
-        <div class="sub" id="topSub">Your active delivery, live</div>
-      </div>
+
+  <div class="map-stage">
+    <div id="map"></div>
+
+    <div class="floating-wallet">
       <a href="wallet.html" class="wallet-pill" id="walletPill">
         <span id="walletWarn" class="warn" style="display:none;">⚠️</span>
         <span id="walletBalanceHeader">₱0</span>
       </a>
     </div>
-  </div>
 
-  <div class="content">
-
-    <div id="emptyState" class="empty-state" style="display:none;">
+    <div id="emptyState" class="map-empty-overlay" style="display:none;">
       <div class="glyph">🗺️</div>
       No active delivery right now.
       <div style="margin-top:14px;">
@@ -50,8 +76,8 @@
       </div>
     </div>
 
-    <div id="activeMapWrap" style="display:none;">
-      <div id="map"></div>
+    <div id="bottomPanel" class="map-bottom-panel" style="display:none;">
+      <div class="panel-handle"></div>
       <div class="map-legend">
         <span><span class="legend-line" style="background:#4285F4;"></span>Road ahead</span>
         <span><span class="legend-line" style="background:#F0A93A;"></span>Distance covered</span>
@@ -59,13 +85,11 @@
       </div>
       <div class="hint" id="locationWarning" style="display:none; color:var(--red);"></div>
       <div class="eta-pill" id="etaPill" style="display:none;"></div>
-      <div class="hint">Route follows real roads via OpenStreetMap routing — actual travel time may still vary with traffic.</div>
 
-      <div class="order-card" style="margin-top:14px;" id="orderCard"></div>
+      <div class="order-card" style="margin-top:12px;" id="orderCard"></div>
 
-      <button type="button" class="btn btn-amber" id="actionBtn" style="margin-top:16px; display:none;"></button>
+      <button type="button" class="btn btn-amber" id="actionBtn" style="margin-top:12px; display:none;"></button>
     </div>
-
   </div>
 
   <div class="tabbar">
@@ -88,6 +112,7 @@ let orderId = null;
 let orderRef = null;
 let orderData = null;
 let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
+let hasCenteredOnUser = false;
 
 const ASSUMED_SPEED_KMH = 25; // used to convert remaining road distance into an ETA
 
@@ -223,6 +248,7 @@ requireAuth(async (user)=>{
     pill.classList.toggle('low', isLow);
     warn.style.display = isLow ? 'inline' : 'none';
   });
+  ensureMap();
   listenToActiveOrder();
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
@@ -247,7 +273,10 @@ const dropoffIcon = L.divIcon({
 
 function ensureMap(){
   if(map) return;
-  map = L.map('map', { zoomControl: true }).setView([14.6760, 121.0437], 13);
+  // zoomControl disabled here, added back explicitly in the top-right corner
+  // so it lands clear of the wallet pill and matches a standard mobile-map layout.
+  map = L.map('map', { zoomControl: false }).setView([14.6760, 121.0437], 13);
+  L.control.zoom({ position: 'topright' }).addTo(map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -264,7 +293,14 @@ function startGeolocation(){
     hideLocationWarning();
     const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     updateRiderMarker(riderPos);
-    if(orderData) updateRouteVisuals(riderPos);
+    if(orderData){
+      updateRouteVisuals(riderPos);
+    } else if(!hasCenteredOnUser){
+      // No active delivery yet — just center the full-screen map on the
+      // rider's own location the first time we get a fix.
+      map.setView([riderPos.lat, riderPos.lng], 15);
+      hasCenteredOnUser = true;
+    }
     broadcastRiderLocation(riderPos);
   }, err=>{
     showLocationWarning(err);
@@ -369,7 +405,8 @@ async function updateRouteVisuals(riderPos){
     [orderData.dropoff.lat, orderData.dropoff.lng],
     [riderPos.lat, riderPos.lng]
   ];
-  map.fitBounds(boundsPoints, { padding: [60, 60] });
+  // Leave extra room at the bottom so the floating panel doesn't cover the route.
+  map.fitBounds(boundsPoints, { paddingTopLeft: [60, 60], paddingBottomRight: [60, 320] });
 }
 
 function listenToActiveOrder(){
@@ -388,7 +425,6 @@ function listenToActiveOrder(){
       showActiveState();
       renderOrderCard();
       renderStage();
-      ensureMap();
       if(map && riderMarker){
         updateRouteVisuals(riderMarker.getLatLng());
       }
@@ -398,17 +434,15 @@ function listenToActiveOrder(){
 }
 
 function showEmptyState(){
-  document.getElementById('emptyState').style.display = 'block';
-  document.getElementById('activeMapWrap').style.display = 'none';
-  document.getElementById('topSub').textContent = 'No active delivery right now';
+  document.getElementById('emptyState').style.display = 'flex';
+  document.getElementById('bottomPanel').style.display = 'none';
   stopEtaCountdown();
   orderId = null; orderRef = null; orderData = null;
 }
 
 function showActiveState(){
   document.getElementById('emptyState').style.display = 'none';
-  document.getElementById('activeMapWrap').style.display = 'block';
-  document.getElementById('topSub').textContent = 'Your active delivery, live';
+  document.getElementById('bottomPanel').style.display = 'block';
 }
 
 function renderOrderCard(){
