@@ -34,6 +34,11 @@
     <p style="text-align:center; font-size:12px; color:#9B9186; margin-top:26px;">
       An account needs <code>role: "admin"</code> set on its Firestore user doc to sign in here — see the README.
     </p>
+
+    <!-- Visible debug panel — safe to delete once login is working. Mirrors
+         whatever's happening to the console, so you don't need DevTools open
+         on a phone/tablet to see what's going wrong. -->
+    <div id="debugPanel" style="display:none; margin-top:20px; padding:12px 14px; background:#F5F0E6; border:1px solid var(--line); border-radius:12px; font-family:'Space Mono'; font-size:11px; color:#586866; white-space:pre-wrap; word-break:break-word;"></div>
   </div>
 </div>
 
@@ -45,19 +50,46 @@
 const form = document.getElementById('loginForm');
 const errorBanner = document.getElementById('errorBanner');
 const signInBtn = document.getElementById('signInBtn');
+const debugPanel = document.getElementById('debugPanel');
 
+function debugLog(label, data){
+  console.log(`[admin-login] ${label}`, data);
+  debugPanel.style.display = 'block';
+  const line = `${label}: ${typeof data === 'object' ? JSON.stringify(data) : data}`;
+  debugPanel.textContent += (debugPanel.textContent ? '\n' : '') + line;
+}
+
+function showError(msg){
+  errorBanner.textContent = msg;
+  errorBanner.style.display = "block";
+}
+
+// If already signed in AND already confirmed admin, skip straight to Requests.
+// Deliberately does NOT auto-sign-out here on its own — that only happens
+// inside the explicit checks below, each with a logged reason, so a bounce
+// back to this page always comes with an explanation in the debug panel.
 auth.onAuthStateChanged(async user=>{
-  if(user){
+  if(!user) return;
+  debugLog('onAuthStateChanged: signed in as', user.uid);
+  try{
     const doc = await db.collection('users').doc(user.uid).get();
+    debugLog('users/' + user.uid + ' exists?', doc.exists);
+    if(doc.exists){
+      debugLog('role field', doc.data().role);
+    }
     if(doc.exists && doc.data().role === 'admin'){
       window.location.href = "requests.html";
     }
+  } catch(err){
+    debugLog('Firestore read error (onAuthStateChanged)', `${err.code || 'unknown'} — ${err.message}`);
   }
 });
 
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
   errorBanner.style.display = "none";
+  debugPanel.textContent = '';
+  debugPanel.style.display = 'none';
   signInBtn.disabled = true;
   signInBtn.innerHTML = '<span class="spinner"></span> Signing in…';
 
@@ -66,23 +98,63 @@ form.addEventListener('submit', async (e)=>{
 
   try{
     const cred = await auth.signInWithEmailAndPassword(email, password);
-    const doc = await db.collection('users').doc(cred.user.uid).get();
-    if(!doc.exists || doc.data().role !== 'admin'){
-      errorBanner.textContent = "This account isn't an admin account.";
-      errorBanner.style.display = "block";
+    debugLog('Auth sign-in succeeded, uid', cred.user.uid);
+
+    let doc;
+    try{
+      doc = await db.collection('users').doc(cred.user.uid).get();
+    } catch(firestoreErr){
+      // This is the case that used to fail silently — a Firestore rules /
+      // network error on the read gets caught separately from "not an
+      // admin", so it shows its real cause instead of a generic bounce.
+      debugLog('Firestore read FAILED', `${firestoreErr.code || 'unknown'} — ${firestoreErr.message}`);
+      showError(`Couldn't verify admin status: ${firestoreErr.code || firestoreErr.message}. This is usually a Firestore security rules issue — check that authenticated users are allowed to read their own users/{uid} doc.`);
       await auth.signOut();
       signInBtn.disabled = false;
       signInBtn.textContent = "Sign In";
       return;
     }
+
+    debugLog('users/' + cred.user.uid + ' exists?', doc.exists);
+    if(doc.exists){
+      debugLog('Full user doc', doc.data());
+    }
+
+    if(!doc.exists){
+      showError("Signed in, but no matching Firestore user document was found at users/" + cred.user.uid + ". Create one with a role field set to \"admin\".");
+      await auth.signOut();
+      signInBtn.disabled = false;
+      signInBtn.textContent = "Sign In";
+      return;
+    }
+    if(doc.data().role !== 'admin'){
+      showError(`Signed in, but this account's role is "${doc.data().role || '(not set)'}", not "admin". Edit the role field on users/${cred.user.uid} in Firestore.`);
+      await auth.signOut();
+      signInBtn.disabled = false;
+      signInBtn.textContent = "Sign In";
+      return;
+    }
+
+    debugLog('Role check passed — redirecting to', 'requests.html');
     window.location.href = "requests.html";
   } catch(err){
-    errorBanner.textContent = "Couldn't sign in. Please check your details and try again.";
-    errorBanner.style.display = "block";
+    debugLog('Auth sign-in FAILED', `${err.code || 'unknown'} — ${err.message}`);
+    showError(friendlyError(err.code));
     signInBtn.disabled = false;
     signInBtn.textContent = "Sign In";
   }
 });
+
+function friendlyError(code){
+  switch(code){
+    case 'auth/invalid-email': return "That email address doesn't look right.";
+    case 'auth/user-not-found': return "No account found with that email.";
+    case 'auth/wrong-password': return "Incorrect password. Try again.";
+    case 'auth/invalid-credential': return "Incorrect email or password.";
+    case 'auth/too-many-requests': return "Too many attempts. Please wait a moment and try again.";
+    default: return `Couldn't sign in (${code || 'unknown error'}). See the debug panel below for details.`;
+  }
+}
 </script>
 </body>
 </html>
