@@ -55,6 +55,11 @@
   </div>
 
   <div class="content">
+    <div id="negativeBalanceBanner" class="error-banner" style="display:none;">
+      ⚠️ Your wallet balance is low — refill to at least ₱30 before you can request new deliveries.
+      <a href="wallet.html" style="color:inherit; font-weight:700; text-decoration:underline;">Refill now</a>
+    </div>
+
     <div id="map" style="margin-bottom:14px;"></div>
 
     <div class="menu-section" id="categoryFilters">
@@ -136,6 +141,7 @@ requireAuth(async user=>{
     const isLow = bal < LOW_BALANCE_THRESHOLD;
     pill.classList.toggle('low', isLow);
     warn.style.display = isLow ? 'inline' : 'none';
+    document.getElementById('negativeBalanceBanner').style.display = bal < MIN_BALANCE_TO_TAKE_ORDERS ? 'block' : 'none';
   });
 });
 

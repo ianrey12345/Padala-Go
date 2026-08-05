@@ -124,6 +124,7 @@ function fmtPeso(n){
    --------------------------------------------------------- */
 const COMMISSION_RATE = 0.12;       // 12% of the fare, deducted from wallet on completion
 const LOW_BALANCE_THRESHOLD = 50;   // header shows a low-balance warning below this
+const MIN_BALANCE_TO_TAKE_ORDERS = 30; // riders can't request/accept a new delivery below this
 
 /* Marks an order completed AND deducts the 12% commission from the
    rider's wallet balance, atomically, so the two can never drift apart.
@@ -239,13 +240,14 @@ function watchWalletBalance(elId, riderId, onUpdate){
 }
 
 /* Gate for any action that lets a rider take on a new delivery (requesting
-   a pending order, accepting a confirmed one, etc). A negative balance
-   means the rider owes commission from a past delivery — they need to
-   refill before taking on more. Returns { allowed, balance }. */
+   a pending order, accepting a confirmed one, etc). A balance below the
+   minimum means the rider needs to refill before taking on more — keeps
+   them from running their wallet down to (or past) zero mid-delivery.
+   Returns { allowed, balance }. */
 async function checkRiderCanTakeOrders(riderId){
   const riderSnap = await db.collection('users').doc(riderId).get();
   const balance = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
-  return { allowed: balance >= 0, balance };
+  return { allowed: balance >= MIN_BALANCE_TO_TAKE_ORDERS, balance };
 }
 
 function timeAgo(ts){
@@ -414,9 +416,9 @@ function showDecisionModal(orderId, order){
     declineBtn.disabled = true;
     acceptBtn.textContent = 'Checking wallet…';
 
-    // A negative (or zero-and-below) wallet balance means the rider owes
-    // commission from a past delivery — block them from taking on a new
-    // one until they refill, rather than letting the debt grow further.
+    // A balance below the minimum means the rider needs to refill before
+    // taking on another delivery — block them from accepting, rather than
+    // letting them start a trip they can't cover commission on.
     const riderId = auth.currentUser ? auth.currentUser.uid : null;
     let gate = { allowed: true, balance: 0 };
     try{
@@ -425,7 +427,7 @@ function showDecisionModal(orderId, order){
 
     if(!gate.allowed){
       cleanup();
-      showToast(`⚠️ Your wallet balance is ${fmtPeso(gate.balance)}. Refill your wallet before accepting new deliveries.`);
+      showToast(`⚠️ Your wallet balance is ${fmtPeso(gate.balance)} — refill to at least ${fmtPeso(MIN_BALANCE_TO_TAKE_ORDERS)} before accepting new deliveries.`);
       declineConfirmedOrder(orderId);
       return;
     }

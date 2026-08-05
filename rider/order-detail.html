@@ -126,6 +126,7 @@ let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watc
 // *different* order — blocks the Request button so they can't stack a
 // second delivery on top of one they haven't completed yet.
 let blockingOrder = null;
+let walletGate = { allowed: true, balance: 0 };
 const ASSUMED_SPEED_KMH = 25; // fallback only, used if the routing service is unreachable
 
 /* Lightweight route cache, same pattern as the rider Map tab — avoids
@@ -371,6 +372,12 @@ async function loadOrder(){
     .get();
   blockingOrder = activeSnap.docs.find(d => d.id !== orderId) || null;
 
+  try{
+    walletGate = await checkRiderCanTakeOrders(currentUser.uid);
+  } catch(e){
+    walletGate = { allowed: true, balance: 0 }; // don't hard-block on a network blip
+  }
+
   const reqDoc = await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).get();
   // Same rule as the Deliveries list: 'declined' (customer declined) and
   // 'declined_by_rider' (rider missed the 15s accept window) both clear the
@@ -387,6 +394,17 @@ function setRequestButton(requested){
     btn.textContent = 'Complete your current delivery first';
     btn.disabled = true;
     btn.className = 'btn btn-outline';
+    return;
+  }
+  // A balance below the minimum means the rider needs to refill before
+  // taking on another delivery. Unlike the blockingOrder case above, this
+  // one they *can* resolve right now, so the button stays tappable and
+  // sends them straight to Refill.
+  if(!walletGate.allowed){
+    btn.textContent = `Refill Wallet (${fmtPeso(walletGate.balance)}) to Request`;
+    btn.disabled = false;
+    btn.className = 'btn btn-amber';
+    btn.onclick = ()=>{ window.location.href = 'wallet.html'; };
     return;
   }
   if(requested){
