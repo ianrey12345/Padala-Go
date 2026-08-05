@@ -81,6 +81,13 @@
       </div>
     </div>
 
+    <div id="locationGate" class="map-empty-overlay" style="display:none; z-index:410;">
+      <div class="glyph">📍</div>
+      <div id="locationGateTitle" style="font-weight:700; color:var(--teal-dark); font-size:15px;">Turn on location to start</div>
+      <div id="locationGateMsg" class="hint" style="max-width:280px; margin:6px auto 0;">Customers see your live position once you enable location, and it's how we track your route.</div>
+      <button type="button" id="enableLocationBtn" class="btn btn-primary" style="width:auto; display:inline-flex; padding:11px 22px; margin-top:16px;">Enable Location</button>
+    </div>
+
     <div id="bottomPanel" class="map-bottom-panel" style="display:none;">
       <div class="panel-handle"></div>
       <div class="map-legend">
@@ -324,14 +331,100 @@ function ensureMap(){
   window.addEventListener('resize', ()=> map.invalidateSize());
   window.addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 200));
 
-  startGeolocation();
+  initGeolocationFlow();
 }
 
-function startGeolocation(){
+/* ---------------------------------------------------------
+   Ask-first location flow. Calling watchPosition() automatically
+   on page load (the old behavior) can get silently denied on
+   mobile — especially iOS Safari and wrapped/installed apps —
+   without the OS ever showing the real permission dialog. Gating
+   the request behind an explicit tap is what reliably triggers
+   the native "Allow Location?" prompt, and lets us give clear
+   recovery steps if it's already been denied.
+   --------------------------------------------------------- */
+async function initGeolocationFlow(){
   if(!navigator.geolocation){
-    showLocationWarning(null);
+    showLocationGate('unsupported');
     return;
   }
+  if(navigator.permissions && navigator.permissions.query){
+    try{
+      const status = await navigator.permissions.query({ name: 'geolocation' });
+      applyPermissionState(status.state);
+      status.onchange = ()=> applyPermissionState(status.state);
+      return;
+    } catch(e){ /* Permissions API not fully supported here — fall through */ }
+  }
+  // No Permissions API (older Safari) — just show the ask-first gate;
+  // we can't know the current state without triggering a prompt.
+  showLocationGate('prompt');
+}
+
+function applyPermissionState(state){
+  if(state === 'granted'){
+    hideLocationGate();
+    startGeolocation();
+  } else if(state === 'denied'){
+    showLocationGate('denied');
+  } else {
+    showLocationGate('prompt');
+  }
+}
+
+function isIOS(){
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+
+function showLocationGate(kind){
+  const gate = document.getElementById('locationGate');
+  const title = document.getElementById('locationGateTitle');
+  const msg = document.getElementById('locationGateMsg');
+  const btn = document.getElementById('enableLocationBtn');
+  gate.style.display = 'flex';
+
+  if(kind === 'denied'){
+    title.textContent = "Location is turned off for Padala Go";
+    msg.innerHTML = isIOS()
+      ? "Open <b>Settings → Safari → Location</b> (or Settings → Padala Go, if you've added it to your Home Screen) and set it to <b>Allow</b>, then tap Try Again."
+      : "Tap the lock/info icon next to the address bar → <b>Permissions → Location → Allow</b>, then tap Try Again.";
+    btn.textContent = "Try Again";
+    btn.style.display = 'inline-flex';
+  } else if(kind === 'unsupported'){
+    title.textContent = "Location isn't available";
+    msg.textContent = "This browser doesn't support location — customers won't be able to see your live position.";
+    btn.style.display = 'none';
+  } else {
+    title.textContent = "Turn on location to start";
+    msg.textContent = "Customers see your live position once you enable location, and it's how we track your route.";
+    btn.textContent = "Enable Location";
+    btn.style.display = 'inline-flex';
+  }
+}
+function hideLocationGate(){
+  document.getElementById('locationGate').style.display = 'none';
+}
+
+document.getElementById('enableLocationBtn').addEventListener('click', ()=>{
+  // A direct call inside a click handler is what actually surfaces the
+  // native permission dialog — retrying getCurrentPosition here (rather
+  // than jumping straight into watchPosition) also gives us one fast,
+  // single-shot result to react to instead of waiting on the ongoing watch.
+  navigator.geolocation.getCurrentPosition(
+    ()=>{ hideLocationGate(); startGeolocation(); },
+    (err)=>{
+      if(err.code === err.PERMISSION_DENIED){
+        showLocationGate('denied');
+      } else {
+        showLocationGate('prompt'); // transient error (timeout, position unavailable) — let them retry
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+
+function startGeolocation(){
+  if(!navigator.geolocation) return;
   watchId = navigator.geolocation.watchPosition(pos=>{
     hideLocationWarning();
     const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -346,20 +439,21 @@ function startGeolocation(){
     }
     broadcastRiderLocation(riderPos);
   }, err=>{
-    showLocationWarning(err);
+    if(err.code === err.PERMISSION_DENIED){
+      // Permission was revoked mid-session (e.g. from the OS settings
+      // while the app was in the background) — send them back through
+      // the full gate rather than just a small inline warning.
+      showLocationGate('denied');
+    } else {
+      showLocationWarning(err);
+    }
   }, { enableHighAccuracy: true });
 }
 
 function showLocationWarning(err){
   const el = document.getElementById('locationWarning');
   if(!el) return;
-  if(err && err.code === err.PERMISSION_DENIED){
-    el.textContent = "Location access is off — turn it on so the customer can see your live location and the map can track your progress.";
-  } else if(!navigator.geolocation){
-    el.textContent = "This browser doesn't support location — the map can't show your live progress.";
-  } else {
-    el.textContent = "Couldn't get your location right now — check that location services are on.";
-  }
+  el.textContent = "Couldn't get your location right now — check that location services are on.";
   el.style.display = 'block';
 }
 function hideLocationWarning(){
