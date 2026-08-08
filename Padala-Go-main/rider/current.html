@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Current · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  .filter-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:10px; -webkit-overflow-scrolling:touch; }
+  .filter-row::-webkit-scrollbar{ display:none; }
+  .filter-chip{
+    flex:0 0 auto; padding:8px 14px; border-radius:20px; font-size:12.5px; font-weight:600;
+    background:var(--paper); color:var(--teal-dark); border:1.5px solid var(--line);
+    cursor:pointer; white-space:nowrap; user-select:none;
+  }
+  .filter-chip.active{ background:var(--teal); color:#fff; border-color:var(--teal); }
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .wallet-pill{
+    flex-shrink:0; display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.15);
+    color:#fff; font-family:'Space Mono'; font-weight:700; font-size:14px;
+    padding:8px 12px; border-radius:14px; text-decoration:none; margin-top:2px;
+  }
+  .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
+  .wallet-pill .warn{ font-size:13px; }
+
+  .route-full{ font-size:11.5px; color:#8A8178; margin-top:2px; font-weight:400; }
+  .client-row{ font-size:13px; color:#586866; margin:4px 0 10px; }
+  .client-row b{ color:var(--ink); }
+
+  .stage-banner{
+    background:var(--paper); border-radius:14px; padding:14px 16px; margin-top:14px;
+    box-shadow:var(--shadow); display:flex; align-items:center; gap:12px;
+  }
+  .stage-banner .glyph{font-size:22px;}
+  .stage-banner .txt{font-size:13.5px; font-weight:600; color:var(--teal-dark);}
+  .stage-banner .sub{font-size:12px; color:#8A8178; margin-top:1px;}
+
+  .act-row{ display:flex; align-items:stretch; gap:10px; margin-top:14px; }
+  .act-row .navigate-btn{
+    flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:11px 16px; text-decoration:none;
+  }
+  .act-wrap{ position:relative; flex-shrink:0; }
+  .act-btn{
+    width:auto; height:100%; padding:11px 22px; display:inline-flex; align-items:center; gap:6px;
+  }
+  .act-btn .caret{ font-size:11px; transition:transform .15s ease; }
+  .act-btn.open .caret{ transform:rotate(180deg); }
+  .act-menu{
+    position:absolute; left:0; bottom:calc(100% + 8px); min-width:200px;
+    background:#fff; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,0.18);
+    border:1px solid var(--line); overflow:hidden; z-index:20; display:none;
+  }
+  .act-menu.show{ display:block; }
+  .act-menu button{
+    width:100%; text-align:left; padding:13px 16px; border:none; background:none;
+    font-family:'Inter'; font-size:14px; font-weight:600; color:var(--ink); cursor:pointer;
+    display:flex; align-items:center; gap:10px;
+  }
+  .act-menu button:not(:last-child){ border-bottom:1px solid var(--line); }
+  .act-menu button:hover{ background:var(--cream); }
+  .act-menu button.danger{ color:var(--red); }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:18px; padding:26px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal-card .note{ font-size:13px; color:#8A8178; margin:8px 0 20px; line-height:1.4; }
+  .modal-actions{ display:flex; gap:10px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Rider</div>
+        <h1>Current</h1>
+        <div class="sub">Your active delivery and order history</div>
+      </div>
+      <a href="wallet.html" class="wallet-pill" id="walletPill">
+        <span id="walletWarn" class="warn" style="display:none;">⚠️</span>
+        <span id="walletBalanceHeader">₱0</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="content">
+    <div id="activeSection" style="display:none; margin-bottom:24px;">
+      <h3 style="font-size:15px; margin-bottom:8px;">Your Active Delivery</h3>
+      <div id="activeCard"></div>
+
+      <div style="text-align:center; margin:14px 0;">
+        <a href="map.html" id="viewMapBtn" class="btn btn-outline" style="width:auto; display:none; padding:11px 26px; text-decoration:none;">🗺️ View Map</a>
+      </div>
+
+      <div class="order-card" id="etaBanner" style="display:none; margin-top:10px; background:#EAF3FF; border-color:#C7DEFF;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:22px;">⏱️</div>
+          <div>
+            <div style="font-weight:700; color:#2A5FAD; font-size:13.5px;" id="etaText">Calculating arrival time…</div>
+            <div style="font-size:12px; color:#8A8178;" id="etaSub"></div>
+          </div>
+        </div>
+      </div>
+      <div class="order-card" id="arrivedBanner" style="display:none; margin-top:10px; background:#FDF1DC; border-color:#F0D9A8;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:22px;">🛵</div>
+          <div>
+            <div style="font-weight:700; color:#B67A16; font-size:13.5px;">You've arrived at the pickup point</div>
+            <div style="font-size:12px; color:#8A8178;" id="arrivedTime"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-size:15px; margin-bottom:8px;">Past Orders</h3>
+    <div class="filter-row" id="pastFilters">
+      <div class="filter-chip active" data-category="all">All</div>
+      <div class="filter-chip" data-category="bike_delivery">🏍️ Bike Delivery</div>
+      <div class="filter-chip" data-category="padala_pabili">🧾 Padala/Pabili</div>
+    </div>
+    <div id="pastList">
+      <div class="empty-state">Loading history…</div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html" class="active"><span class="g">📋</span>Current</a>
+    <a href="chat.html"><span class="g">💬</span>Chat</a>
+    <a href="map.html"><span class="g">🗺️</span>Map</a>
+    <a href="menu.html"><span class="g">☰</span>Menu</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let currentUser = null;
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+/* Title = the landmark captured at order-creation time (e.g. "7-Eleven
+   Kamias"); falls back to the first comma-separated segment of the full
+   address for older orders that predate landmark capture. The full
+   address is always shown underneath in .route-full, regardless. */
+function pointTitle(point){
+  if(point.landmark) return point.landmark;
+  return point.address ? point.address.split(',')[0].trim() : 'Address';
+}
+
+/* ---------------------------------------------------------
+   Live ticking ETA countdown for the rider's own Current tab —
+   same pattern as the customer's order-status.html. Reads the
+   `riderLocation` field already written onto the order doc by
+   the Map tab (map.html), so no separate geolocation watch is
+   needed here; this just renders the latest known fix. The live
+   road-following route and progress overlay itself live on the
+   dedicated Map tab — the "View Map" button below links there.
+   --------------------------------------------------------- */
+let etaDeadlineMs = null;
+let etaCountdownTimer = null;
+let currentActiveOrder = null;
+let currentActiveOrderId = null;
+let activeCustomerPhone = null;
+let activeCustomerName = null;
+
+function startEtaCountdown(){
+  if(etaCountdownTimer) return; // already ticking — recalibration just moved the deadline
+  tickEtaCountdown();
+  etaCountdownTimer = setInterval(tickEtaCountdown, 1000);
+}
+
+function stopEtaCountdown(){
+  if(etaCountdownTimer){
+    clearInterval(etaCountdownTimer);
+    etaCountdownTimer = null;
+  }
+  etaDeadlineMs = null;
+}
+
+function tickEtaCountdown(){
+  if(etaDeadlineMs === null) return;
+  const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
+
+  const etaText = document.getElementById('etaText');
+  if(etaText){
+    if(secsLeft <= 0){
+      etaText.textContent = "Arriving any moment…";
+    } else {
+      const m = Math.floor(secsLeft / 60);
+      const s = secsLeft % 60;
+      etaText.textContent = m > 0 ? `Arriving in ${m}m ${s.toString().padStart(2,'0')}s` : `Arriving in ${s}s`;
+    }
+  }
+}
+
+function stageInfo(o){
+  if(o.status === 'confirmed' && !o.arrivedAtPickup){
+    return { text: "Heading to pickup point", sub: "Follow the route to the pickup point." };
+  } else if(o.status === 'confirmed' && o.arrivedAtPickup){
+    return { text: "Arrived at pickup point", sub: "Customer has been notified. Once you have the item, mark it picked up." };
+  } else if(o.status === 'in_progress'){
+    return { text: "On the way to drop-off", sub: "Follow the route to the drop-off point." };
+  }
+  return { text: "Loading order…", sub: "" };
+}
+
+function updateEtaDisplay(o){
+  currentActiveOrder = o;
+  document.getElementById('viewMapBtn').style.display = 'inline-flex';
+
+  const etaBanner = document.getElementById('etaBanner');
+  const arrivedBanner = document.getElementById('arrivedBanner');
+
+  if(o.status === 'confirmed' && o.arrivedAtPickup){
+    etaBanner.style.display = 'none';
+    stopEtaCountdown();
+    arrivedBanner.style.display = 'block';
+    document.getElementById('arrivedTime').textContent = o.arrivedAtPickupAt ? timeAgo(o.arrivedAtPickupAt) : '';
+    return;
+  }
+  arrivedBanner.style.display = 'none';
+
+  const dest = o.status === 'in_progress' ? o.dropoff : o.pickup;
+
+  if(o.riderLocation && dest){
+    const km = distanceKmBetween(o.riderLocation, { lat: dest.lat, lng: dest.lng });
+    const mins = Math.max(1, Math.round((km / 25) * 60)); // same assumed 25km/h speed used elsewhere
+    etaBanner.style.display = 'block';
+    document.getElementById('etaSub').textContent = `${km.toFixed(1)} km to ${o.status === 'in_progress' ? 'drop-off' : 'pickup'}`;
+    // Recalibrate the countdown deadline against this fresh location fix.
+    etaDeadlineMs = Date.now() + mins * 60000;
+    startEtaCountdown();
+  } else {
+    etaBanner.style.display = 'none';
+    stopEtaCountdown();
+  }
+}
+
+requireAuth(async user=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  listenToActiveDelivery();
+  listenToPastOrders();
+  watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
+  watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
+    const pill = document.getElementById('walletPill');
+    const warn = document.getElementById('walletWarn');
+    const isLow = bal < LOW_BALANCE_THRESHOLD;
+    pill.classList.toggle('low', isLow);
+    warn.style.display = isLow ? 'inline' : 'none';
+  });
+});
+
+function listenToActiveDelivery(){
+  db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['confirmed','in_progress'])
+    .onSnapshot(snap=>{
+      const section = document.getElementById('activeSection');
+      if(snap.empty){
+        section.style.display = 'none';
+        document.getElementById('etaBanner').style.display = 'none';
+        document.getElementById('arrivedBanner').style.display = 'none';
+        document.getElementById('viewMapBtn').style.display = 'none';
+        stopEtaCountdown();
+        currentActiveOrder = null;
+        currentActiveOrderId = null;
+        activeCustomerPhone = null;
+        activeCustomerName = null;
+        activeCustomerOrderIdFetched = null;
+        return;
+      }
+      const doc = snap.docs[0];
+      const o = doc.data();
+      section.style.display = 'block';
+      currentActiveOrderId = doc.id;
+
+      const dest = o.status === 'in_progress' ? o.dropoff : o.pickup;
+      const navHref = dest ? `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}&travelmode=driving` : '#';
+      const stage = stageInfo(o);
+
+      document.getElementById('activeCard').innerHTML = `
+        <a href="map.html" style="text-decoration:none; color:inherit;">
+          <div class="order-card">
+            <div class="top-row">
+              <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+              <span class="fare-tag">${fmtPeso(o.fare)}</span>
+            </div>
+            <div class="client-row">🙋 Client: <b id="activeClientName">${activeCustomerOrderIdFetched === doc.id && activeCustomerName ? activeCustomerName : 'Loading…'}</b></div>
+            <div class="route">📍 <b>${pointTitle(o.pickup)}</b><div class="route-full">${o.pickup.address}</div></div>
+            <div class="route">🎯 <b>${pointTitle(o.dropoff)}</b><div class="route-full">${o.dropoff.address}</div></div>
+            ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+            <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+            <div class="hint" style="margin-top:10px;">Tap for map &amp; directions →</div>
+          </div>
+        </a>
+
+        <div class="stage-banner">
+          <div class="glyph">📍</div>
+          <div>
+            <div class="txt">${stage.text}</div>
+            <div class="sub">${stage.sub}</div>
+          </div>
+        </div>
+
+        <div class="act-row">
+          <a href="${navHref}" target="_blank" class="btn btn-primary navigate-btn">🧭 Turn-by-Turn</a>
+          <div class="act-wrap">
+            <button type="button" class="btn btn-outline act-btn" id="actBtn">Act <span class="caret">▾</span></button>
+            <div class="act-menu" id="actMenu">
+              <button type="button" id="actCallBtn">📞 Call Customer</button>
+              <button type="button" class="danger" id="actCancelBtn">🚫 Cancel Order</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      wireActMenu(doc.id, o);
+      // Fetch the customer's phone once per order (not on every snapshot
+      // tick) — cached in activeCustomerPhone/activeCustomerName for the
+      // Call action.
+      if(activeCustomerOrderIdFetched !== doc.id){
+        fetchActiveCustomerContact(o.customerId, doc.id);
+      }
+
+      updateEtaDisplay(o);
+    });
+}
+
+let activeCustomerOrderIdFetched = null;
+
+async function fetchActiveCustomerContact(customerId, orderId){
+  activeCustomerOrderIdFetched = orderId;
+  try{
+    const custDoc = await db.collection('users').doc(customerId).get();
+    activeCustomerPhone = custDoc.exists ? (custDoc.data().phone || null) : null;
+    activeCustomerName = custDoc.exists ? (custDoc.data().name || 'Customer') : 'Customer';
+  } catch(e){
+    activeCustomerPhone = null;
+    activeCustomerName = 'Customer';
+  }
+  // Only touch the DOM if the rider is still looking at this same order —
+  // avoids overwriting a newer card if they picked up a different delivery
+  // while this fetch was in flight.
+  if(currentActiveOrderId === orderId){
+    const nameEl = document.getElementById('activeClientName');
+    if(nameEl) nameEl.textContent = activeCustomerName;
+  }
+}
+
+function wireActMenu(orderId, o){
+  const actBtn = document.getElementById('actBtn');
+  const actMenu = document.getElementById('actMenu');
+  if(!actBtn || !actMenu) return;
+
+  actBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    const willShow = !actMenu.classList.contains('show');
+    actMenu.classList.toggle('show', willShow);
+    actBtn.classList.toggle('open', willShow);
+  });
+
+  document.getElementById('actCallBtn').addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    closeActMenu();
+    if(activeCustomerPhone){
+      window.location.href = `tel:${activeCustomerPhone}`;
+    } else {
+      alert("This customer doesn't have a phone number on file.");
+    }
+  });
+
+  document.getElementById('actCancelBtn').addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    closeActMenu();
+    showRiderCancelModal(orderId, o);
+  });
+}
+
+// Attached once at page load — closes the Act dropdown on any outside tap,
+// regardless of how many times the card (and its buttons) get re-rendered.
+document.addEventListener('click', closeActMenu);
+
+function closeActMenu(){
+  const actBtn = document.getElementById('actBtn');
+  const actMenu = document.getElementById('actMenu');
+  if(actMenu) actMenu.classList.remove('show');
+  if(actBtn) actBtn.classList.remove('open');
+}
+
+function showRiderCancelModal(orderId, o){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div style="font-size:30px;">🚫</div>
+      <div style="font-weight:700; font-size:16px; color:var(--teal-dark); margin-top:6px;">Cancel this delivery?</div>
+      <div class="note">The customer will see this delivery marked as cancelled. This can't be undone.</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="riderModalKeepBtn">Keep Delivery</button>
+        <button class="btn btn-primary" id="riderModalCancelBtn" style="background:var(--red);">Cancel Delivery</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').appendChild(overlay);
+
+  overlay.querySelector('#riderModalKeepBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#riderModalCancelBtn').addEventListener('click', async ()=>{
+    const btn = overlay.querySelector('#riderModalCancelBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try{
+      await db.collection('orders').doc(orderId).update({
+        status: 'cancelled',
+        cancelledAt: firebase.firestore.FieldValue.serverTimestamp(),
+        cancelledBy: 'rider'
+      });
+      overlay.remove();
+    } catch(err){
+      btn.disabled = false;
+      btn.textContent = 'Cancel Delivery';
+      console.error('Rider cancel-order failed:', err);
+      // Surface the real Firebase error (e.g. "Missing or insufficient
+      // permissions") instead of a generic message — makes it obvious
+      // when this is a Firestore security-rules issue rather than a
+      // network blip.
+      alert(err && err.message ? `Couldn't cancel this delivery: ${err.message}` : "Couldn't cancel this delivery. Please try again.");
+    }
+  });
+}
+
+let allPastOrders = [];
+let activePastCategory = 'all';
+
+function listenToPastOrders(){
+  db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['completed','cancelled'])
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      allPastOrders = snap.docs;
+      renderPastOrders();
+    }, err=>{
+      document.getElementById('pastList').innerHTML =
+        `<div class="empty-state">Couldn't load history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
+
+function renderPastOrders(){
+  const list = document.getElementById('pastList');
+  const filtered = activePastCategory === 'all'
+    ? allPastOrders
+    : allPastOrders.filter(doc=> doc.data().serviceType === activePastCategory);
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No completed deliveries in this category yet.</div>`;
+    return;
+  }
+  list.innerHTML = '';
+  filtered.forEach(doc=>{
+    const o = doc.data();
+    const card = document.createElement('div');
+    card.className = 'order-card';
+    card.innerHTML = `
+      <div class="top-row">
+        <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+        <span class="fare-tag">${fmtPeso(o.fare)}</span>
+      </div>
+      <div class="route">📍 ${o.pickup.address}</div>
+      <div class="route">🎯 ${o.dropoff.address}</div>
+      <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+    `;
+    list.appendChild(card);
+  });
+}
+
+document.getElementById('pastFilters').querySelectorAll('.filter-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    activePastCategory = chip.dataset.category;
+    document.getElementById('pastFilters').querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    renderPastOrders();
+  });
+});
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+
+window.addEventListener('beforeunload', ()=>{
+  stopEtaCountdown();
+});
+</script>
+</body>
+</html>

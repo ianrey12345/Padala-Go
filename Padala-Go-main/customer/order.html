@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Delivery · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  /* z-index:2 gives this its own stacking context so the dropdown's
+     z-index below actually wins over Leaflet's map panes/controls,
+     which otherwise render on top (Leaflet's control layer can reach
+     z-index:1000). */
+  .search-wrap{ position:relative; margin-bottom:10px; z-index:2; }
+  .search-wrap input{
+    width:100%; padding:13px 14px; border-radius:12px; border:1.5px solid var(--line);
+    background:var(--paper); font-size:14px; font-family:'Inter'; color:var(--ink);
+  }
+  .search-wrap input:focus{ outline:none; border-color:var(--teal); }
+  .search-results{
+    position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:1000;
+    background:var(--paper); border:1.5px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow); max-height:240px; overflow-y:auto;
+  }
+  .search-result-row{ padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .search-result-row:last-child{ border-bottom:none; }
+  .search-result-row:hover, .search-result-row:active{ background:var(--cream); }
+  .search-result-row .r-title{ font-size:13.5px; font-weight:600; color:var(--ink); }
+  .search-result-row .r-sub{ font-size:12px; color:#8A8178; margin-top:2px; }
+  .search-note{ padding:12px 14px; font-size:13px; color:#8A8178; }
+  /* Explicit (not implicit/auto) z-index on the map itself, so its
+     stacking position relative to .search-wrap is never ambiguous
+     regardless of DOM order or how Leaflet manages its own internal
+     panes/controls. */
+  #map{ position:relative; z-index:1; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar plain">
+    <a href="home.html" class="back">← Back</a>
+    <h1 id="serviceTitle" style="color:#fff; font-size:19px;">Bike Delivery</h1>
+  </div>
+
+  <div class="content">
+
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <button type="button" class="btn btn-sm" id="modePickupBtn" style="flex:1; background:var(--teal); color:#fff;">📍 Set Pickup</button>
+      <button type="button" class="btn btn-sm" id="modeDropoffBtn" style="flex:1; background:var(--line); color:var(--ink);">🎯 Set Drop-off</button>
+    </div>
+
+    <div class="search-wrap" id="searchWrap">
+      <input type="text" id="searchInput" placeholder="Search a place for pickup…" autocomplete="off">
+      <div id="searchResults" class="search-results" style="display:none;"></div>
+    </div>
+
+    <button type="button" class="btn btn-outline btn-sm" id="useLocationBtn" style="width:100%; margin-bottom:10px;" disabled>
+      🔵 Use My Current Location as Pickup
+    </button>
+
+    <div id="map"></div>
+    <div class="map-legend">
+      <span><span class="pin-dot" style="background:#4285F4;"></span>You (live)</span>
+      <span><span class="pin-dot pickup"></span>Pickup</span>
+      <span><span class="pin-dot dropoff"></span>Drop-off</span>
+    </div>
+    <div class="hint" id="mapHint">Tap the map to set your pickup point.</div>
+    <div class="hint" id="locationHint" style="display:none; color:var(--red);"></div>
+
+    <div class="point-row">
+      <div class="marker pickup"></div>
+      <div class="addr placeholder" id="pickupAddr">No pickup point set</div>
+    </div>
+    <div class="point-row">
+      <div class="marker dropoff"></div>
+      <div class="addr placeholder" id="dropoffAddr">No drop-off point set</div>
+    </div>
+
+    <div class="field" style="margin-top:16px;">
+      <label for="notes">Notes for the rider (landmarks, gate code, item to buy, etc.)</label>
+      <textarea id="notes" placeholder="e.g. Beside 7-Eleven, blue gate. Please buy 2pcs pandesal if padala/pabili."></textarea>
+    </div>
+
+    <div class="meter">
+      <div class="row">
+        <span class="label">Distance</span>
+        <span class="distance" id="distanceReadout">— km</span>
+      </div>
+      <div class="row">
+        <span class="label">Total Fare</span>
+        <span class="fare-total"><span class="peso">₱</span><span id="fareReadout">0</span></span>
+      </div>
+      <div class="breakdown" id="fareBreakdown">Set both points to calculate fare</div>
+    </div>
+
+    <button type="button" class="btn btn-amber" id="placeOrderBtn" style="margin-top:20px;" disabled>
+      Place Order
+    </button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const serviceType = params.get('service') === 'padala_pabili' ? 'padala_pabili' : 'bike_delivery';
+document.getElementById('serviceTitle').textContent = serviceType === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery';
+
+let currentUser = null;
+requireAuth(user=>{
+  currentUser = user;
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
+});
+
+let map;
+let pickupMarker = null, dropoffMarker = null;
+let pickupPoint = null, dropoffPoint = null; // {lat,lng,address}
+let activeMode = 'pickup';
+
+const modePickupBtn = document.getElementById('modePickupBtn');
+const modeDropoffBtn = document.getElementById('modeDropoffBtn');
+const mapHint = document.getElementById('mapHint');
+const placeOrderBtn = document.getElementById('placeOrderBtn');
+const searchInput = document.getElementById('searchInput');
+const searchResultsEl = document.getElementById('searchResults');
+let searchDebounceTimer = null;
+let searchAbortController = null;
+
+function setMode(mode){
+  activeMode = mode;
+  modePickupBtn.style.background = mode === 'pickup' ? 'var(--teal)' : 'var(--line)';
+  modePickupBtn.style.color = mode === 'pickup' ? '#fff' : 'var(--ink)';
+  modeDropoffBtn.style.background = mode === 'dropoff' ? 'var(--teal)' : 'var(--line)';
+  modeDropoffBtn.style.color = mode === 'dropoff' ? '#fff' : 'var(--ink)';
+  mapHint.textContent = mode === 'pickup'
+    ? 'Tap the map to set your pickup point.'
+    : 'Tap the map to set your drop-off point.';
+  searchInput.placeholder = mode === 'pickup'
+    ? 'Search a place for pickup…'
+    : 'Search a place for drop-off…';
+}
+modePickupBtn.addEventListener('click', ()=>setMode('pickup'));
+modeDropoffBtn.addEventListener('click', ()=>setMode('dropoff'));
+
+document.getElementById('useLocationBtn').addEventListener('click', ()=>{
+  if(!liveLocation) return;
+  placePoint('pickup', liveLocation);
+  setMode('dropoff');
+  map.setView([liveLocation.lat, liveLocation.lng], map.getZoom());
+});
+
+const myLocationIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#4285F4;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+const pickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:20px;height:20px;border-radius:50%;background:#0C4A45;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [20,20], iconAnchor: [10,10]
+});
+const dropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:20px;height:20px;border-radius:50%;background:#F0A93A;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [20,20], iconAnchor: [10,10]
+});
+
+function initMap(){
+  const defaultCenter = [14.6760, 121.0437]; // Quezon City
+  map = L.map('map', { zoomControl: true }).setView(defaultCenter, 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  // (Reverse geocoding still uses the free OpenStreetMap Nominatim service — see reverseGeocode())
+
+  startLiveLocation();
+
+  map.on('click', (e)=>{
+    const point = { lat: e.latlng.lat, lng: e.latlng.lng };
+    placePoint(activeMode, point);
+    if(activeMode === 'pickup' && !dropoffPoint){
+      setMode('dropoff');
+    }
+  });
+}
+
+let liveLocation = null;
+let myLocationMarker = null;
+
+function startLiveLocation(){
+  if(!navigator.geolocation){
+    document.getElementById('locationHint').textContent =
+      "This browser doesn't support location — tap the map to set your points manually.";
+    document.getElementById('locationHint').style.display = 'block';
+    return;
+  }
+
+  // watchPosition (rather than a one-time getCurrentPosition) keeps this live —
+  // the "You are here" marker updates in real time as the device moves.
+  // The browser's own permission prompt appears automatically on this call.
+  navigator.geolocation.watchPosition(
+    pos=>{
+      liveLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      document.getElementById('locationHint').style.display = 'none';
+      document.getElementById('useLocationBtn').disabled = false;
+
+      if(!myLocationMarker){
+        myLocationMarker = L.marker([liveLocation.lat, liveLocation.lng], {
+          icon: myLocationIcon, title: 'You are here', zIndexOffset: 999
+        }).addTo(map);
+        map.setView([liveLocation.lat, liveLocation.lng], map.getZoom());
+      } else {
+        myLocationMarker.setLatLng([liveLocation.lat, liveLocation.lng]);
+      }
+    },
+    err=>{
+      const hint = document.getElementById('locationHint');
+      if(err.code === err.PERMISSION_DENIED){
+        hint.textContent = "Location access was denied — you can still tap the map to set your pickup and drop-off points manually.";
+      } else {
+        hint.textContent = "Couldn't get your live location — tap the map to set your points manually.";
+      }
+      hint.style.display = 'block';
+    },
+    { enableHighAccuracy: true }
+  );
+}
+
+function placePoint(kind, point, precomputedGeo){
+  const icon = kind === 'pickup' ? pickupIcon : dropoffIcon;
+
+  if(kind === 'pickup'){
+    if(pickupMarker) map.removeLayer(pickupMarker);
+    pickupMarker = L.marker([point.lat, point.lng], { icon, draggable: true }).addTo(map);
+    pickupMarker.on('dragend', ()=> onMarkerMoved('pickup', pickupMarker));
+  } else {
+    if(dropoffMarker) map.removeLayer(dropoffMarker);
+    dropoffMarker = L.marker([point.lat, point.lng], { icon, draggable: true }).addTo(map);
+    dropoffMarker.on('dragend', ()=> onMarkerMoved('dropoff', dropoffMarker));
+  }
+
+  const apply = (geo)=>{
+    const full = { lat: point.lat, lng: point.lng, ...geo };
+    if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
+    updatePointRow(kind, geo.address);
+    recalcFare();
+  };
+
+  // A search result already carries its own address details, so there's
+  // no need to round-trip to Nominatim's reverse endpoint again.
+  if(precomputedGeo){ apply(precomputedGeo); } else { reverseGeocode(point, apply); }
+}
+
+function onMarkerMoved(kind, marker){
+  const pos = marker.getLatLng();
+  const point = { lat: pos.lat, lng: pos.lng };
+  reverseGeocode(point, (geo)=>{
+    const full = { ...point, ...geo };
+    if(kind === 'pickup'){ pickupPoint = full; } else { dropoffPoint = full; }
+    updatePointRow(kind, geo.address);
+    recalcFare();
+  });
+}
+
+/* Picks the most specific "landmark" name available from a Nominatim
+   address object — a named POI (shop, amenity, building) if the point
+   landed on one, otherwise the house number + street, otherwise falls
+   back to the first segment of the full display name. Shared by both
+   reverse geocoding (tap/drag on map) and forward search (typed query). */
+function extractLandmark(a, displayName){
+  return a.amenity || a.shop || a.building || a.leisure || a.tourism || a.office || a.name
+    || (a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road)
+    || (displayName ? displayName.split(',')[0].trim() : '');
+}
+
+async function reverseGeocode(point, cb){
+  // Free reverse geocoding via OpenStreetMap's Nominatim — no API key or
+  // billing required. Falls back to raw coordinates only if the request fails.
+  try{
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${point.lat}&lon=${point.lng}&zoom=18&addressdetails=1`
+    );
+    const data = await res.json();
+    if(data && data.display_name){
+      const a = data.address || {};
+      // Philippine addresses vary in which field holds the municipality/city name —
+      // try the common ones in order of specificity.
+      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+      cb({
+        address: data.display_name,
+        municipality,
+        landmark: extractLandmark(a, data.display_name),
+        street: a.road || ''
+      });
+    } else {
+      const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+      cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
+    }
+  } catch(err){
+    const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+    cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
+  }
+}
+
+function updatePointRow(kind, address){
+  const el = document.getElementById(kind === 'pickup' ? 'pickupAddr' : 'dropoffAddr');
+  el.textContent = address;
+  el.classList.remove('placeholder');
+}
+
+/* ---------------------------------------------------------
+   Search bar — lets the customer type an address or place name
+   instead of only tapping the map. Uses Nominatim's free forward
+   search, biased toward the Philippines and the current map view
+   (not strictly limited to it, so a specific address elsewhere
+   can still be found). Applies to whichever point — pickup or
+   drop-off — is currently active via the mode toggle above.
+   --------------------------------------------------------- */
+searchInput.addEventListener('input', ()=>{
+  clearTimeout(searchDebounceTimer);
+  const q = searchInput.value.trim();
+  if(q.length < 3){
+    searchResultsEl.style.display = 'none';
+    searchResultsEl.innerHTML = '';
+    return;
+  }
+  searchDebounceTimer = setTimeout(()=> runSearch(q), 400);
+});
+
+searchInput.addEventListener('focus', ()=>{
+  if(searchResultsEl.innerHTML) searchResultsEl.style.display = 'block';
+});
+
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('#searchWrap')) searchResultsEl.style.display = 'none';
+});
+
+async function runSearch(query){
+  searchResultsEl.style.display = 'block';
+  searchResultsEl.innerHTML = `<div class="search-note">Searching…</div>`;
+
+  if(searchAbortController) searchAbortController.abort();
+  searchAbortController = new AbortController();
+
+  try{
+    const center = map.getCenter();
+    // viewbox biases results toward the current map area without strictly
+    // limiting to it (bounded=0) — lets a specific faraway address still
+    // be found, while keeping nearby places at the top.
+    const viewbox = `${center.lng - 0.5},${center.lat + 0.5},${center.lng + 0.5},${center.lat - 0.5}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}` +
+      `&addressdetails=1&limit=6&countrycodes=ph&viewbox=${viewbox}&bounded=0`;
+    const res = await fetch(url, { signal: searchAbortController.signal });
+    const results = await res.json();
+
+    if(!results.length){
+      searchResultsEl.innerHTML = `<div class="search-note">No results found.</div>`;
+      return;
+    }
+
+    searchResultsEl.innerHTML = '';
+    results.forEach(r=>{
+      const a = r.address || {};
+      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+      const row = document.createElement('div');
+      row.className = 'search-result-row';
+      const titleEl = document.createElement('div');
+      titleEl.className = 'r-title';
+      titleEl.textContent = extractLandmark(a, r.display_name);
+      const subEl = document.createElement('div');
+      subEl.className = 'r-sub';
+      subEl.textContent = [a.road, municipality].filter(Boolean).join(', ') || r.display_name;
+      row.appendChild(titleEl);
+      row.appendChild(subEl);
+      row.addEventListener('click', ()=> selectSearchResult(r));
+      searchResultsEl.appendChild(row);
+    });
+  } catch(err){
+    if(err.name === 'AbortError') return;
+    searchResultsEl.innerHTML = `<div class="search-note">Search failed — try again.</div>`;
+  }
+}
+
+function selectSearchResult(r){
+  const point = { lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+  const a = r.address || {};
+  const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+
+  placePoint(activeMode, point, {
+    address: r.display_name,
+    municipality,
+    landmark: extractLandmark(a, r.display_name),
+    street: a.road || ''
+  });
+
+  searchInput.value = '';
+  searchResultsEl.style.display = 'none';
+  searchResultsEl.innerHTML = '';
+  map.setView([point.lat, point.lng], 16);
+
+  if(activeMode === 'pickup' && !dropoffPoint){
+    setMode('dropoff');
+  }
+}
+
+function recalcFare(){
+  if(pickupPoint && dropoffPoint){
+    const km = distanceKmBetween(pickupPoint, dropoffPoint);
+    const fare = computeFare(km);
+    document.getElementById('distanceReadout').textContent = km.toFixed(2) + ' km';
+    document.getElementById('fareReadout').textContent = fare.toLocaleString('en-PH');
+    document.getElementById('fareBreakdown').textContent =
+      `₱${BASE_FARE} first km + ₱${PER_KM_RATE}/km × ${Math.max(0, km-1).toFixed(2)} succeeding km`;
+    placeOrderBtn.disabled = false;
+    placeOrderBtn.dataset.fare = fare;
+    placeOrderBtn.dataset.km = km.toFixed(2);
+  }
+}
+
+placeOrderBtn.addEventListener('click', async ()=>{
+  if(!currentUser || !pickupPoint || !dropoffPoint) return;
+  placeOrderBtn.disabled = true;
+  placeOrderBtn.innerHTML = '<span class="spinner"></span> Placing order…';
+
+  try{
+    const orderRef = await db.collection('orders').add({
+      customerId: currentUser.uid,
+      serviceType,
+      pickup: pickupPoint,
+      dropoff: dropoffPoint,
+      notes: document.getElementById('notes').value.trim(),
+      distanceKm: parseFloat(placeOrderBtn.dataset.km),
+      fare: parseInt(placeOrderBtn.dataset.fare, 10),
+      status: 'pending',
+      riderId: null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    window.location.href = `order-status.html?id=${orderRef.id}`;
+  } catch(err){
+    alert("Couldn't place your order. Please try again.");
+    placeOrderBtn.disabled = false;
+    placeOrderBtn.textContent = "Place Order";
+  }
+});
+
+setMode('pickup');
+initMap();
+</script>
+</body>
+</html>

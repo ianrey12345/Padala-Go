@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Statistics · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar plain">
+    <a href="wallet.html" class="back">← Wallet</a>
+    <h1 style="color:#fff; font-size:19px;">Statistics</h1>
+  </div>
+
+  <div class="content">
+    <div class="stat-grid">
+      <div class="stat-card earned">
+        <div class="stat-lbl">Earned</div>
+        <div class="stat-val" id="statEarned">₱0</div>
+      </div>
+      <div class="stat-card commission">
+        <div class="stat-lbl">Commission</div>
+        <div class="stat-val" id="statCommission">−₱0</div>
+      </div>
+      <div class="stat-card profit">
+        <div class="stat-lbl">Profit</div>
+        <div class="stat-val" id="statProfit">₱0</div>
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:18px;">
+      Earned = total fares from completed deliveries (collected in cash). Commission = 10% of each fare, auto-deducted from your wallet. Profit = what you keep after commission.
+    </div>
+
+    <h3 style="font-size:15px; margin-bottom:8px;">Completed Deliveries</h3>
+    <div id="completedList">
+      <div class="empty-state">Loading…</div>
+    </div>
+
+    <h3 style="font-size:15px; margin:20px 0 8px;">Wallet Transactions</h3>
+    <div class="menu-section" id="txnSection">
+      <div style="padding:14px 16px;" class="empty-state" id="txnEmpty">No wallet transactions yet.</div>
+      <div id="txnList" style="padding:0 16px;"></div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html"><span class="g">📋</span>Current</a>
+    <a href="chat.html"><span class="g">💬</span>Chat</a>
+    <a href="map.html"><span class="g">🗺️</span>Map</a>
+    <a href="menu.html" class="active"><span class="g">☰</span>Menu</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+requireAuth(async (user)=>{
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  loadCompletedOrders(user.uid);
+  loadWalletTransactions(user.uid);
+  watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
+});
+
+async function loadCompletedOrders(riderId){
+  const list = document.getElementById('completedList');
+  try{
+    const snap = await db.collection('orders')
+      .where('riderId','==', riderId)
+      .where('status','==','completed')
+      .orderBy('createdAt','desc')
+      .get();
+
+    let totalEarned = 0;
+    let totalCommission = 0;
+
+    if(snap.empty){
+      list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No completed deliveries yet.</div>`;
+    } else {
+      list.innerHTML = '';
+      snap.forEach(doc=>{
+        const o = doc.data();
+        const commission = (typeof o.commissionDeducted === 'number')
+          ? o.commissionDeducted
+          : Math.round(o.fare * COMMISSION_RATE);
+        totalEarned += o.fare;
+        totalCommission += commission;
+
+        const card = document.createElement('div');
+        card.className = 'order-card';
+        card.innerHTML = `
+          <div class="top-row">
+            <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+            <span class="fare-tag">${fmtPeso(o.fare)}</span>
+          </div>
+          <div class="route">📍 ${o.pickup.address}</div>
+          <div class="route">🎯 ${o.dropoff.address}</div>
+          <div class="route" style="color:var(--red);">− ${fmtPeso(commission)} commission (10%)</div>
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    document.getElementById('statEarned').textContent = fmtPeso(totalEarned);
+    document.getElementById('statCommission').textContent = '−' + fmtPeso(totalCommission);
+    document.getElementById('statProfit').textContent = fmtPeso(totalEarned - totalCommission);
+  } catch(err){
+    list.innerHTML = `<div class="empty-state">Couldn't load your delivery history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+  }
+}
+
+async function loadWalletTransactions(riderId){
+  const txnList = document.getElementById('txnList');
+  const txnEmpty = document.getElementById('txnEmpty');
+  try{
+    const snap = await db.collection('users').doc(riderId).collection('walletTransactions')
+      .orderBy('createdAt','desc')
+      .limit(50)
+      .get();
+
+    if(snap.empty){
+      txnEmpty.style.display = 'block';
+      return;
+    }
+    txnEmpty.style.display = 'none';
+
+    snap.forEach(doc=>{
+      const t = doc.data();
+      const row = document.createElement('div');
+      row.className = 'txn-row';
+      const isRefill = t.type === 'refill';
+      row.innerHTML = `
+        <div>
+          <div class="txn-main">${isRefill ? '➕ Wallet Refill' : '➖ Commission (10%)'}</div>
+          <div class="txn-sub">${t.createdAt ? timeAgo(t.createdAt) : ''}${!isRefill && t.fare ? ` · from ${fmtPeso(t.fare)} fare` : ''}</div>
+        </div>
+        <div class="txn-amount ${isRefill ? 'positive' : 'negative'}">${isRefill ? '+' : '−'}${fmtPeso(Math.abs(t.amount))}</div>
+      `;
+      txnList.appendChild(row);
+    });
+  } catch(err){
+    txnEmpty.textContent = "Couldn't load wallet transactions.";
+    txnEmpty.style.display = 'block';
+  }
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>

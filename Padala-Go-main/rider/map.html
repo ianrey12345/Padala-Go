@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Map · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body{ height:100%; }
+  .app-shell{ height:100vh; min-height:100vh; overflow:hidden; }
+  @supports (height: 100dvh){
+    .app-shell{ height:100dvh; min-height:100dvh; }
+  }
+
+  .map-stage{ position:relative; flex:1; min-height:300px; }
+  #map{ position:absolute; inset:0; z-index:0; min-height:100%; }
+
+  /* Leaflet's own zoom control, nudged to sit clear of the notch/status bar */
+  .leaflet-top.leaflet-right{ top:calc(14px + env(safe-area-inset-top)); right:14px; }
+  .leaflet-bar a{ width:38px !important; height:38px !important; line-height:38px !important; font-size:16px !important; }
+  .leaflet-control-zoom a{ font-size:18px !important; }
+  .recenter-control a{ display:flex; align-items:center; justify-content:center; }
+
+  .floating-wallet{
+    position:absolute; top:calc(14px + env(safe-area-inset-top)); left:14px; z-index:500;
+  }
+  .wallet-pill{
+    flex-shrink:0; display:flex; align-items:center; gap:6px;
+    background:var(--teal-dark); color:#fff; font-family:'Space Mono'; font-weight:700; font-size:14px;
+    padding:9px 13px; border-radius:14px; text-decoration:none; box-shadow:0 4px 14px rgba(0,0,0,0.25);
+  }
+  .wallet-pill.low{ background:var(--amber); color:var(--teal-dark); }
+  .wallet-pill .warn{ font-size:13px; }
+
+  .map-empty-overlay{
+    position:absolute; inset:0; z-index:400; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:24px;
+    background:rgba(251,248,243,0.88); color:#8A8178;
+  }
+  .map-empty-overlay .glyph{ font-size:34px; margin-bottom:10px; }
+
+  .map-bottom-panel{
+    position:absolute; left:0; right:0; bottom:0; z-index:450;
+    background:var(--paper); border-radius:20px 20px 0 0;
+    box-shadow:0 -6px 24px rgba(0,0,0,0.16);
+    padding:14px 16px calc(16px + env(safe-area-inset-bottom));
+    max-height:44vh; overflow-y:auto;
+  }
+  .panel-handle{
+    width:36px; height:4px; border-radius:3px; background:var(--line);
+    margin:0 auto 10px;
+  }
+
+  .eta-pill{
+    display:inline-block; background:var(--cream); color:var(--teal-dark);
+    font-family:'Space Mono'; font-size:12.5px; padding:4px 10px; border-radius:20px; margin-top:8px;
+  }
+  .map-legend{display:flex; gap:16px; font-size:12.5px; margin-top:2px; color:#586866; flex-wrap:wrap;}
+  .legend-line{ display:inline-block; width:18px; height:4px; border-radius:2px; vertical-align:middle; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <div class="map-stage">
+    <div id="map"></div>
+
+    <div class="floating-wallet">
+      <a href="wallet.html" class="wallet-pill" id="walletPill">
+        <span id="walletWarn" class="warn" style="display:none;">⚠️</span>
+        <span id="walletBalanceHeader">₱0</span>
+      </a>
+    </div>
+
+    <div id="emptyState" class="map-empty-overlay" style="display:none;">
+      <div class="glyph">🗺️</div>
+      No active delivery right now.
+      <div style="margin-top:14px;">
+        <a href="orders.html" class="btn btn-primary" style="width:auto; display:inline-flex; padding:11px 22px;">Browse Deliveries</a>
+      </div>
+    </div>
+
+    <div id="bottomPanel" class="map-bottom-panel" style="display:none;">
+      <div class="panel-handle"></div>
+      <div class="map-legend">
+        <span><span class="legend-line" style="background:#4285F4;"></span>Road ahead</span>
+        <span><span class="legend-line" style="background:#F0A93A;"></span>Distance covered</span>
+        <span>🏁 Drop-off</span>
+      </div>
+      <div class="hint" id="locationWarning" style="display:none; color:var(--red);"></div>
+      <div class="eta-pill" id="etaPill" style="display:none;"></div>
+
+      <button type="button" class="btn btn-amber" id="actionBtn" style="margin-top:12px; display:none;"></button>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <a href="orders.html"><span class="g">🏍️</span>Deliveries</a>
+    <a href="current.html"><span class="g">📋</span>Current</a>
+    <a href="map.html" class="active"><span class="g">🗺️</span>Map</a>
+    <a href="menu.html"><span class="g">☰</span>Menu</a>
+    <a href="#" id="logoutLink"><span class="g">🚪</span>Log Out</a>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let currentUser = null;
+let orderId = null;
+let orderRef = null;
+let orderData = null;
+let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
+let hasCenteredOnUser = false;
+let boundsFitForOrderId = null; // only auto-frame the route once per order, not on every GPS tick
+
+const ASSUMED_SPEED_KMH = 25; // used to convert remaining road distance into an ETA
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+/* ---------------------------------------------------------
+   Live ticking ETA countdown, recalibrated whenever a fresh
+   GPS fix moves the rider's projected position along the route.
+   --------------------------------------------------------- */
+let etaDeadlineMs = null;
+let etaCountdownTimer = null;
+let etaDistanceKm = null;
+
+function startEtaCountdown(){
+  if(etaCountdownTimer) return;
+  tickEtaCountdown();
+  etaCountdownTimer = setInterval(tickEtaCountdown, 1000);
+}
+function stopEtaCountdown(){
+  if(etaCountdownTimer){ clearInterval(etaCountdownTimer); etaCountdownTimer = null; }
+  etaDeadlineMs = null;
+  etaDistanceKm = null;
+}
+function tickEtaCountdown(){
+  const pill = document.getElementById('etaPill');
+  if(!pill || etaDeadlineMs === null) return;
+  const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
+  const distTxt = etaDistanceKm !== null ? `${etaDistanceKm.toFixed(1)} km · ` : '';
+  if(secsLeft <= 0){
+    pill.textContent = `${distTxt}Arriving any moment…`;
+  } else {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    pill.textContent = m > 0
+      ? `${distTxt}Arriving in ${m}m ${s.toString().padStart(2,'0')}s`
+      : `${distTxt}Arriving in ${s}s`;
+  }
+}
+
+/* ---------------------------------------------------------
+   Real road routing via OSRM's free public routing server —
+   no API key required. Returns [[lat,lng], ...] plus distance.
+   This is a shared demo server, so we cache the result and
+   only re-fetch when the destination changes, the rider drifts
+   noticeably off the drawn route, or the route has gone stale.
+   --------------------------------------------------------- */
+let currentRoute = null;      // { coords, destKey, distanceKm }
+let lastRouteFetchAt = 0;
+const ROUTE_REFRESH_MS = 45000;
+const ROUTE_DEVIATION_KM = 0.25;
+
+async function fetchRoadRoute(origin, dest){
+  const url = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(!data.routes || !data.routes.length) throw new Error('No route found');
+  const route = data.routes[0];
+  const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]); // GeoJSON is [lng,lat]
+  return { coords, distanceKm: route.distance / 1000, durationMin: route.duration / 60 };
+}
+
+/* Closest point on a single segment to a {lat,lng} point — treats the
+   small local area as planar, which is accurate enough at city scale. */
+function closestPointOnSegment(p1, p2, p){
+  const [y1, x1] = p1, [y2, x2] = p2;
+  const px = p.lng, py = p.lat;
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx*dx + dy*dy;
+  let t = lenSq === 0 ? 0 : ((px - x1)*dx + (py - y1)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return [y1 + t*dy, x1 + t*dx];
+}
+
+/* Projects the rider's live position onto the route polyline, returning
+   where along the route they currently are — this is what lets us draw
+   a genuine "distance covered" overlay instead of a straight guess. */
+function projectOntoRoute(coords, pos){
+  let bestDistKm = Infinity, bestIdx = 0, bestPoint = coords[0];
+  for(let i=0; i<coords.length-1; i++){
+    const cand = closestPointOnSegment(coords[i], coords[i+1], pos);
+    const d = distanceKmBetween({ lat: cand[0], lng: cand[1] }, pos);
+    if(d < bestDistKm){ bestDistKm = d; bestIdx = i; bestPoint = cand; }
+  }
+  return { index: bestIdx, point: bestPoint, offRouteKm: bestDistKm };
+}
+
+function routeLengthKm(coords){
+  let total = 0;
+  for(let i=0; i<coords.length-1; i++){
+    total += distanceKmBetween({ lat: coords[i][0], lng: coords[i][1] }, { lat: coords[i+1][0], lng: coords[i+1][1] });
+  }
+  return total;
+}
+
+async function ensureRoute(origin, dest, destKey){
+  const now = Date.now();
+  if(currentRoute && currentRoute.destKey === destKey){
+    const { offRouteKm } = projectOntoRoute(currentRoute.coords, origin);
+    const stale = now - lastRouteFetchAt > ROUTE_REFRESH_MS;
+    if(offRouteKm < ROUTE_DEVIATION_KM && !stale) return currentRoute;
+  }
+  try{
+    const r = await fetchRoadRoute(origin, dest);
+    currentRoute = { coords: r.coords, destKey, distanceKm: r.distanceKm, durationMin: r.durationMin, fallback: false };
+    lastRouteFetchAt = now;
+  } catch(err){
+    console.warn('Routing service unavailable, falling back to a straight line:', err);
+    if(!currentRoute || currentRoute.destKey !== destKey){
+      const km = distanceKmBetween(origin, dest);
+      currentRoute = {
+        coords: [[origin.lat, origin.lng], [dest.lat, dest.lng]],
+        destKey, distanceKm: km,
+        durationMin: (km / ASSUMED_SPEED_KMH) * 60, // no real routing data to go on here, so fall back to the flat estimate
+        fallback: true
+      };
+    }
+  }
+  return currentRoute;
+}
+
+requireAuth(async (user)=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists || doc.data().role !== 'rider'){
+    await auth.signOut();
+    window.location.href = "index.html";
+    return;
+  }
+  watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
+    const pill = document.getElementById('walletPill');
+    const warn = document.getElementById('walletWarn');
+    const isLow = bal < LOW_BALANCE_THRESHOLD;
+    pill.classList.toggle('low', isLow);
+    warn.style.display = isLow ? 'inline' : 'none';
+  });
+  ensureMap();
+  listenToActiveOrder();
+  watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
+  watchForNewMessages(user.uid);
+});
+
+const riderIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#F0A93A;border:2px solid #082F2B;box-shadow:0 0 0 2px #fff;"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+const pickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#2F8F5B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [18,18], iconAnchor: [9,9]
+});
+const dropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:20px;line-height:1;">🏁</div>',
+  iconSize: [20,20], iconAnchor: [10,20]
+});
+
+function ensureMap(){
+  if(map) return;
+  // zoomControl disabled here, added back explicitly in the top-right corner
+  // so it lands clear of the wallet pill and matches a standard mobile-map layout.
+  map = L.map('map', { zoomControl: false }).setView([14.6760, 121.0437], 13);
+  L.control.zoom({ position: 'topright' }).addTo(map);
+
+  // Recenter button, stacked right below the zoom controls — jumps back
+  // to the rider's own live location whenever they've panned away.
+  const RecenterControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function(){
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control recenter-control');
+      const btn = L.DomUtil.create('a', '', container);
+      btn.href = '#';
+      btn.title = 'Recenter on my location';
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('aria-label', 'Recenter on my location');
+      btn.innerHTML = '🧭';
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(btn, 'click', (e)=>{
+        L.DomEvent.preventDefault(e);
+        if(riderMarker){
+          map.setView(riderMarker.getLatLng(), Math.max(map.getZoom(), 15));
+        } else if(navigator.geolocation){
+          navigator.geolocation.getCurrentPosition(pos=>{
+            map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+          });
+        }
+      });
+      return container;
+    }
+  });
+  map.addControl(new RecenterControl());
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  // Leaflet measures its container at creation time — if the surrounding
+  // flex layout (or a font/webfont swap) hasn't fully settled yet, it can
+  // size itself off a too-small reading and only render tiles for that
+  // smaller area, leaving blank space below. Re-measuring after layout
+  // settles, and again on any resize, keeps the map filling its container.
+  requestAnimationFrame(()=> map.invalidateSize());
+  setTimeout(()=> map.invalidateSize(), 300);
+  window.addEventListener('resize', ()=> map.invalidateSize());
+  window.addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 200));
+
+  startGeolocation();
+}
+
+function startGeolocation(){
+  if(!navigator.geolocation){
+    showLocationWarning(null);
+    return;
+  }
+  watchId = navigator.geolocation.watchPosition(pos=>{
+    hideLocationWarning();
+    const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    updateRiderMarker(riderPos);
+    if(orderData){
+      updateRouteVisuals(riderPos);
+    } else if(!hasCenteredOnUser){
+      // No active delivery yet — just center the full-screen map on the
+      // rider's own location the first time we get a fix.
+      map.setView([riderPos.lat, riderPos.lng], 15);
+      hasCenteredOnUser = true;
+    }
+    broadcastRiderLocation(riderPos);
+  }, err=>{
+    showLocationWarning(err);
+  }, { enableHighAccuracy: true });
+}
+
+function showLocationWarning(err){
+  const el = document.getElementById('locationWarning');
+  if(!el) return;
+  if(err && err.code === err.PERMISSION_DENIED){
+    el.textContent = "Location access is off — turn it on so the customer can see your live location and the map can track your progress.";
+  } else if(!navigator.geolocation){
+    el.textContent = "This browser doesn't support location — the map can't show your live progress.";
+  } else {
+    el.textContent = "Couldn't get your location right now — check that location services are on.";
+  }
+  el.style.display = 'block';
+}
+function hideLocationWarning(){
+  const el = document.getElementById('locationWarning');
+  if(el) el.style.display = 'none';
+}
+
+let lastLocationWriteAt = 0;
+function broadcastRiderLocation(pos){
+  const now = Date.now();
+  if(now - lastLocationWriteAt < 4000) return;
+  lastLocationWriteAt = now;
+  if(!orderId) return;
+  db.collection('orders').doc(orderId).update({
+    riderLocation: pos,
+    riderLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(err=>{ console.warn('Could not broadcast rider location:', err); });
+}
+
+function updateRiderMarker(pos){
+  const latlng = [pos.lat, pos.lng];
+  if(!riderMarker){
+    riderMarker = L.marker(latlng, { icon: riderIcon, title: 'You', zIndexOffset: 1000 }).addTo(map);
+  } else {
+    riderMarker.setLatLng(latlng);
+  }
+}
+
+function currentDestination(){
+  if(orderData.status === 'in_progress') return orderData.dropoff;
+  return orderData.pickup;
+}
+
+function ensurePickupDropoffMarkers(){
+  if(!pickupMarker){
+    pickupMarker = L.marker([orderData.pickup.lat, orderData.pickup.lng], {
+      icon: pickupIcon, title: 'Pickup: ' + orderData.pickup.address
+    }).addTo(map);
+  }
+  if(!dropoffMarker){
+    dropoffMarker = L.marker([orderData.dropoff.lat, orderData.dropoff.lng], {
+      icon: dropoffIcon, title: 'Drop-off: ' + orderData.dropoff.address
+    }).addTo(map);
+  }
+}
+
+async function updateRouteVisuals(riderPos){
+  const dest = currentDestination();
+  if(!dest || orderData.status === 'completed'){
+    stopEtaCountdown();
+    document.getElementById('etaPill').style.display = 'none';
+    return;
+  }
+
+  ensurePickupDropoffMarkers();
+
+  const destKey = orderData.status === 'in_progress' ? 'dropoff' : 'pickup';
+  const route = await ensureRoute(riderPos, dest, destKey);
+  const { index, point } = projectOntoRoute(route.coords, riderPos);
+
+  const traveled = route.coords.slice(0, index + 1).concat([point]);
+  const remaining = [point].concat(route.coords.slice(index + 1));
+
+  if(routeLine) map.removeLayer(routeLine);
+  if(progressLine) map.removeLayer(progressLine);
+
+  // Full road-following route, in blue — this is the actual path, not a
+  // straight-line guess, courtesy of OSRM's free routing service.
+  routeLine = L.polyline(remaining, { color: '#4285F4', weight: 5, opacity: 0.85 }).addTo(map);
+  // Distance already covered, overlaid in amber.
+  progressLine = L.polyline(traveled, { color: '#F0A93A', weight: 5, opacity: 0.95 }).addTo(map);
+
+  const remainingKm = routeLengthKm(remaining);
+  // Scale the remaining time off OSRM's own duration estimate for this route
+  // (which already accounts for road type/speed limits), rather than a flat
+  // km/h guess — this is what was making our ETA run high vs. Google Maps.
+  const paceMinPerKm = route.distanceKm > 0 ? route.durationMin / route.distanceKm : (60 / ASSUMED_SPEED_KMH);
+  const mins = Math.max(1, Math.round(remainingKm * paceMinPerKm));
+  document.getElementById('etaPill').style.display = 'inline-block';
+  etaDistanceKm = remainingKm;
+  etaDeadlineMs = Date.now() + mins * 60000;
+  startEtaCountdown();
+
+  // Frame the route once when we first pick it up, so the rider starts out
+  // seeing the whole trip — after that, zoom/pan is entirely manual.
+  if(boundsFitForOrderId !== orderId){
+    const boundsPoints = [
+      [orderData.pickup.lat, orderData.pickup.lng],
+      [orderData.dropoff.lat, orderData.dropoff.lng],
+      [riderPos.lat, riderPos.lng]
+    ];
+    map.fitBounds(boundsPoints, { paddingTopLeft: [60, 60], paddingBottomRight: [60, 320] });
+    boundsFitForOrderId = orderId;
+  }
+}
+
+function listenToActiveOrder(){
+  db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['confirmed','in_progress'])
+    .onSnapshot(snap=>{
+      if(snap.empty){
+        showEmptyState();
+        return;
+      }
+      const doc = snap.docs[0];
+      orderId = doc.id;
+      orderRef = doc.ref;
+      orderData = doc.data();
+      showActiveState();
+      renderStage();
+      if(map && riderMarker){
+        updateRouteVisuals(riderMarker.getLatLng());
+      }
+    }, err=>{
+      console.warn('Could not load active delivery:', err);
+    });
+}
+
+function showEmptyState(){
+  document.getElementById('emptyState').style.display = 'flex';
+  document.getElementById('bottomPanel').style.display = 'none';
+  stopEtaCountdown();
+  orderId = null; orderRef = null; orderData = null;
+  boundsFitForOrderId = null;
+}
+
+function showActiveState(){
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('bottomPanel').style.display = 'block';
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderStage(){
+  const o = orderData;
+  const actionBtn = document.getElementById('actionBtn');
+  actionBtn.style.display = 'block';
+  actionBtn.onclick = null;
+
+  if(o.status === 'confirmed' && !o.arrivedAtPickup){
+    actionBtn.textContent = "I've Arrived at Pickup";
+    actionBtn.className = "btn btn-amber";
+    actionBtn.onclick = ()=> orderRef.update({
+      arrivedAtPickup: true,
+      arrivedAtPickupAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else if(o.status === 'confirmed' && o.arrivedAtPickup){
+    actionBtn.textContent = "Lets Go!";
+    actionBtn.className = "btn btn-primary";
+    actionBtn.onclick = ()=> orderRef.update({ status: 'in_progress' });
+  } else if(o.status === 'in_progress'){
+    actionBtn.textContent = "Mark Delivered";
+    actionBtn.className = "btn btn-amber";
+    actionBtn.onclick = async ()=>{
+      actionBtn.disabled = true;
+      actionBtn.textContent = "Completing…";
+      try{
+        const commission = await completeOrderWithCommission(orderId, currentUser.uid, o.fare);
+        showToast(`Delivered! ${fmtPeso(commission)} commission (10%) deducted from your wallet.`);
+      } catch(err){
+        alert("Couldn't complete the delivery. Please check your connection and try again.");
+        actionBtn.disabled = false;
+        actionBtn.textContent = "Mark Delivered";
+      }
+    };
+  }
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  if(watchId) navigator.geolocation.clearWatch(watchId);
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+
+window.addEventListener('beforeunload', ()=>{
+  if(watchId) navigator.geolocation.clearWatch(watchId);
+  stopEtaCountdown();
+});
+</script>
+</body>
+</html>

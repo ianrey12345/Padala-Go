@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Current Order · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  body{ background:var(--paper); }
+  .map-wrap{ position:relative; height:38vh; min-height:230px; }
+  #map{ width:100%; height:100%; }
+  .back-fab{
+    position:absolute; top:16px; left:16px; width:42px; height:42px; border-radius:50%;
+    background:#fff; box-shadow:0 4px 14px rgba(0,0,0,0.2); display:flex; align-items:center;
+    justify-content:center; font-size:20px; color:var(--teal-dark); text-decoration:none; z-index:5;
+  }
+  .sheet{
+    position:relative; margin-top:-18px; background:#fff; border-radius:22px 22px 0 0;
+    padding:18px 20px 110px; box-shadow:0 -6px 20px rgba(0,0,0,0.06); min-height:40vh;
+  }
+  .grabber{ width:40px; height:4px; background:var(--line); border-radius:4px; margin:0 auto 16px; }
+  .order-title{ font-family:'Sora'; font-weight:700; font-size:19px; color:var(--teal-dark); margin-bottom:2px; }
+  .order-subtitle{ font-size:13px; color:#8A8178; margin-bottom:16px; }
+  .fare-big{ font-family:'Space Mono'; font-weight:700; font-size:38px; color:var(--ink); line-height:1; }
+  .fare-sub{ font-size:13px; color:#8A8178; margin-bottom:20px; }
+  .point-line{ display:flex; gap:12px; }
+  .point-marks{ display:flex; flex-direction:column; align-items:center; padding-top:4px; }
+  .point-dot{ width:12px; height:12px; border-radius:50%; }
+  .point-dot.hollow{ border:2.5px solid var(--teal); background:#fff; }
+  .point-dot.filled{ background:var(--teal-dark); }
+  .point-connector{ width:2px; flex:1; background:var(--line); margin:3px 0; min-height:22px; }
+  .point-body{ padding-bottom:18px; }
+  .point-title{ font-size:15.5px; font-weight:700; color:var(--ink); }
+  .point-detail{ font-size:13px; color:#8A8178; margin-top:2px; }
+  .stats-row{ display:flex; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:16px 0; margin:8px 0 18px; }
+  .stat{ flex:1; text-align:center; }
+  .stat .val{ font-size:16px; font-weight:700; color:var(--ink); }
+  .stat .lbl{ font-size:11.5px; color:#8A8178; margin-top:2px; }
+  .msg-box{ background:var(--cream); border-radius:14px; padding:14px 16px; margin-bottom:8px; }
+  .msg-box .msg-text{ font-size:13.5px; color:var(--ink); font-style:italic; line-height:1.5; }
+  .msg-box .msg-from{ font-size:12px; color:#8A8178; margin-top:8px; }
+  .msg-box .msg-from b{ color:var(--teal-dark); }
+  .request-bar{
+    position:fixed; bottom:0; left:0; right:0; max-width:480px; margin:0 auto;
+    background:#fff; padding:14px 20px calc(14px + env(safe-area-inset-bottom));
+    box-shadow:0 -4px 16px rgba(0,0,0,0.08);
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="map-wrap">
+    <a href="orders.html" class="back-fab">←</a>
+    <div id="map"></div>
+  </div>
+
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="order-title">Current order</div>
+    <div class="order-subtitle" id="orderSubtitle">Padala Go</div>
+
+    <div class="fare-big" id="fareBig">₱—</div>
+    <div class="fare-sub">in cash</div>
+
+    <div class="point-line">
+      <div class="point-marks">
+        <div class="point-dot hollow"></div>
+        <div class="point-connector"></div>
+      </div>
+      <div class="point-body">
+        <div class="point-title" id="pickupTitle">Loading…</div>
+        <div class="point-detail" id="pickupDetail"></div>
+      </div>
+    </div>
+    <div class="point-line">
+      <div class="point-marks">
+        <div class="point-dot filled"></div>
+      </div>
+      <div class="point-body">
+        <div class="point-title" id="dropoffTitle"></div>
+        <div class="point-detail" id="dropoffDetail"></div>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat">
+        <div class="val" id="statToAddress">—</div>
+        <div class="lbl">To address</div>
+      </div>
+      <div class="stat">
+        <div class="val" id="statEta">—</div>
+        <div class="lbl">Arrival time</div>
+      </div>
+      <div class="stat">
+        <div class="val" id="statDistance">—</div>
+        <div class="lbl">Distance</div>
+      </div>
+    </div>
+
+    <div class="route" id="clientNameRow" style="display:none; margin-bottom:14px;">🙋 Client: <b id="clientNameVal" style="color:var(--ink);"></b></div>
+
+    <div class="msg-box" id="msgBox" style="display:none;">
+      <div class="msg-text" id="msgText"></div>
+      <div class="msg-from">Client<br><b id="msgFrom"></b></div>
+    </div>
+  </div>
+
+  <div class="request-bar">
+    <button type="button" class="btn btn-primary" id="requestBtn">Request</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const orderId = params.get('id');
+let currentUser = null;
+let orderData = null;
+let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
+// Set if the rider already has a confirmed/in_progress delivery on a
+// *different* order — blocks the Request button so they can't stack a
+// second delivery on top of one they haven't completed yet.
+let blockingOrder = null;
+let walletGate = { allowed: true, balance: 0 };
+const ASSUMED_SPEED_KMH = 25; // fallback only, used if the routing service is unreachable
+
+/* Lightweight route cache, same pattern as the rider Map tab — avoids
+   hitting the shared OSRM demo server on every GPS tick. */
+let currentRoute = null;
+let lastRouteFetchAt = 0;
+const ROUTE_REFRESH_MS = 45000;
+const ROUTE_DEVIATION_KM = 0.25;
+
+async function ensureRoute(origin, dest){
+  const now = Date.now();
+  if(currentRoute){
+    const { offRouteKm } = projectOntoRoute(currentRoute.coords, origin);
+    const stale = now - lastRouteFetchAt > ROUTE_REFRESH_MS;
+    if(offRouteKm < ROUTE_DEVIATION_KM && !stale) return currentRoute;
+  }
+  try{
+    const r = await fetchRoadRoute(origin, dest);
+    currentRoute = { coords: r.coords, distanceKm: r.distanceKm, durationMin: r.durationMin };
+    lastRouteFetchAt = now;
+  } catch(err){
+    console.warn('Routing service unavailable, falling back to a straight line:', err);
+    if(!currentRoute){
+      const km = distanceKmBetween(origin, dest);
+      currentRoute = { coords: [[origin.lat, origin.lng], [dest.lat, dest.lng]], distanceKm: km, durationMin: (km / ASSUMED_SPEED_KMH) * 60 };
+    }
+  }
+  return currentRoute;
+}
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+/* Title = the specific landmark/place (e.g. "7-Eleven Kamias"), small text
+   below = just street + municipality — no zip code, no province, no country,
+   to keep it scannable. `landmark`/`street`/`municipality` are captured by
+   order.html's reverseGeocode() at order-creation time; older orders made
+   before that existed only have the old flat `address` string, so we fall
+   back to a best-effort split of that instead. */
+function formatPoint(point, titleElId, detailElId){
+  const titleEl = document.getElementById(titleElId);
+  const detailEl = document.getElementById(detailElId);
+  if(point.landmark){
+    titleEl.textContent = point.landmark;
+    detailEl.textContent = [point.street, point.municipality].filter(Boolean).join(', ');
+  } else {
+    const [title, ...rest] = point.address.split(',');
+    titleEl.textContent = title.trim();
+    detailEl.textContent = rest.slice(0, 2).join(',').trim();
+  }
+}
+
+/* Same live ticking countdown pattern as active-delivery.html and the
+   customer's order-status page — recalibrated on every fresh GPS fix. */
+let etaDeadlineMs = null;
+let etaCountdownTimer = null;
+
+function startEtaCountdown(){
+  if(etaCountdownTimer) return;
+  tickEtaCountdown();
+  etaCountdownTimer = setInterval(tickEtaCountdown, 1000);
+}
+
+function stopEtaCountdown(){
+  if(etaCountdownTimer){
+    clearInterval(etaCountdownTimer);
+    etaCountdownTimer = null;
+  }
+  etaDeadlineMs = null;
+}
+
+function tickEtaCountdown(){
+  const el = document.getElementById('statEta');
+  if(!el || etaDeadlineMs === null) return;
+  const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
+  if(secsLeft <= 0){
+    el.textContent = "Any moment";
+  } else {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    el.textContent = m > 0 ? `${m}m ${s.toString().padStart(2,'0')}s` : `${s}s`;
+  }
+}
+
+requireAuth(user=>{
+  currentUser = user;
+  if(!orderId){ window.location.href = "orders.html"; return; }
+  loadOrder();
+  // So the Accept/Decline countdown pops up right here if the customer
+  // confirms this rider while they're still viewing the order detail page
+  // — previously this only fired on orders.html / current.html, meaning a
+  // rider had to leave this page to see it.
+  watchForRiderConfirmations(user.uid);
+  watchForOrderCancellations(user.uid);
+});
+
+initMap();
+
+const riderIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#F0A93A;border:2px solid #082F2B;box-shadow:0 0 0 2px #fff;"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+const pickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#2F8F5B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [18,18], iconAnchor: [9,9]
+});
+const dropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:20px;line-height:1;">🏁</div>',
+  iconSize: [20,20], iconAnchor: [10,20]
+});
+
+function initMap(){
+  map = L.map('map', { zoomControl: false }).setView([14.6760, 121.0437], 13);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  if(navigator.geolocation){
+    watchId = navigator.geolocation.watchPosition(pos=>{
+      const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      updateRiderMarker(riderPos);
+      if(orderData) updateVisuals();
+      broadcastRiderProfileLocation(riderPos);
+    }, ()=>{}, { enableHighAccuracy: true });
+  }
+
+  if(orderData) updateVisuals();
+}
+
+function updateRiderMarker(pos){
+  const latlng = [pos.lat, pos.lng];
+  if(!riderMarker){
+    riderMarker = L.marker(latlng, { icon: riderIcon, title: 'You', zIndexOffset: 1000 }).addTo(map);
+  } else {
+    riderMarker.setLatLng(latlng);
+  }
+}
+
+let lastProfileLocationWriteAt = 0;
+function broadcastRiderProfileLocation(pos){
+  // Throttled so a rider just browsing this order doesn't hammer Firestore.
+  // Lets customers see an ETA for this rider before deciding to confirm them.
+  const now = Date.now();
+  if(now - lastProfileLocationWriteAt < 8000) return;
+  lastProfileLocationWriteAt = now;
+  db.collection('users').doc(currentUser.uid).update({
+    liveLocation: pos,
+    liveLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(()=>{ /* ignore transient failures */ });
+}
+
+function updateVisuals(){
+  if(!map || !orderData) return;
+  const o = orderData;
+
+  if(!pickupMarker){
+    pickupMarker = L.marker([o.pickup.lat, o.pickup.lng], { icon: pickupIcon, title: 'Pickup' }).addTo(map);
+  }
+  if(!dropoffMarker){
+    dropoffMarker = L.marker([o.dropoff.lat, o.dropoff.lng], { icon: dropoffIcon, title: 'Drop-off' }).addTo(map);
+  }
+
+  const boundsPoints = [
+    [o.pickup.lat, o.pickup.lng],
+    [o.dropoff.lat, o.dropoff.lng]
+  ];
+
+  if(riderMarker){
+    const riderPos = riderMarker.getLatLng();
+    const riderPt = { lat: riderPos.lat, lng: riderPos.lng };
+    boundsPoints.push([riderPos.lat, riderPos.lng]);
+
+    updateRoute(riderPt, { lat: o.pickup.lat, lng: o.pickup.lng });
+  }
+
+  map.fitBounds(boundsPoints, { padding: [70, 70] });
+}
+
+async function updateRoute(riderPt, pickupPt){
+  const route = await ensureRoute(riderPt, pickupPt);
+  const { index, point } = projectOntoRoute(route.coords, riderPt);
+  const remaining = [point].concat(route.coords.slice(index + 1));
+  const traveled = route.coords.slice(0, index + 1).concat([point]);
+
+  if(routeLine) map.removeLayer(routeLine);
+  if(progressLine) map.removeLayer(progressLine);
+  // Real road route in blue, with the distance already covered overlaid
+  // in amber — same treatment as the rider's live Map tab.
+  routeLine = L.polyline(remaining, { color: '#4285F4', weight: 5, opacity: 0.85 }).addTo(map);
+  progressLine = L.polyline(traveled, { color: '#F0A93A', weight: 5, opacity: 0.95 }).addTo(map);
+
+  const remainingKm = routeLengthKm(remaining);
+  // Pace derived from OSRM's own duration for this route (accounts for
+  // road type) rather than a flat assumed speed — keeps this in line with
+  // real-world ETAs like Google Maps instead of running consistently high.
+  const paceMinPerKm = route.distanceKm > 0 ? route.durationMin / route.distanceKm : (60 / ASSUMED_SPEED_KMH);
+  const mins = Math.max(1, Math.round(remainingKm * paceMinPerKm));
+  document.getElementById('statToAddress').textContent = remainingKm.toFixed(1) + ' km';
+  etaDeadlineMs = Date.now() + mins * 60000;
+  startEtaCountdown();
+}
+
+async function loadOrder(){
+  const doc = await db.collection('orders').doc(orderId).get();
+  if(!doc.exists){
+    document.getElementById('pickupTitle').textContent = "Order not found.";
+    return;
+  }
+  orderData = doc.data();
+  const o = orderData;
+
+  document.getElementById('orderSubtitle').textContent = `Padala Go, ${serviceLabel(o.serviceType)}`;
+  document.getElementById('fareBig').textContent = fmtPeso(o.fare);
+
+  formatPoint(o.pickup, 'pickupTitle', 'pickupDetail');
+  formatPoint(o.dropoff, 'dropoffTitle', 'dropoffDetail');
+
+  document.getElementById('statDistance').textContent = o.distanceKm + ' km';
+
+  let clientName = 'Customer';
+  try{
+    const custDoc = await db.collection('users').doc(o.customerId).get();
+    clientName = custDoc.exists ? (custDoc.data().name || 'Customer') : 'Customer';
+  } catch(e){ /* keep default label */ }
+  document.getElementById('clientNameVal').textContent = clientName;
+  document.getElementById('clientNameRow').style.display = 'block';
+
+  if(o.notes){
+    document.getElementById('msgBox').style.display = 'block';
+    document.getElementById('msgText').textContent = o.notes;
+    document.getElementById('msgFrom').textContent = clientName;
+  }
+
+  if(map) updateVisuals();
+
+  const activeSnap = await db.collection('orders')
+    .where('riderId','==', currentUser.uid)
+    .where('status','in', ['confirmed','in_progress'])
+    .get();
+  blockingOrder = activeSnap.docs.find(d => d.id !== orderId) || null;
+
+  try{
+    walletGate = await checkRiderCanTakeOrders(currentUser.uid);
+  } catch(e){
+    walletGate = { allowed: true, balance: 0 }; // don't hard-block on a network blip
+  }
+
+  const reqDoc = await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).get();
+  // Same rule as the Deliveries list: 'declined' (customer declined) and
+  // 'declined_by_rider' (rider missed the 15s accept window) both clear the
+  // "requested" state, so the rider can send a fresh request once the order
+  // reopens to 'pending'.
+  const reqStatus = reqDoc.exists ? reqDoc.data().status : null;
+  const requested = reqStatus !== null && reqStatus !== 'declined' && reqStatus !== 'declined_by_rider';
+  setRequestButton(requested);
+}
+
+function setRequestButton(requested){
+  const btn = document.getElementById('requestBtn');
+  if(blockingOrder){
+    btn.textContent = 'Complete your current delivery first';
+    btn.disabled = true;
+    btn.className = 'btn btn-outline';
+    return;
+  }
+  // A balance below the minimum means the rider needs to refill before
+  // taking on another delivery. Unlike the blockingOrder case above, this
+  // one they *can* resolve right now, so the button stays tappable and
+  // sends them straight to Refill.
+  if(!walletGate.allowed){
+    btn.textContent = `Refill Wallet (${fmtPeso(walletGate.balance)}) to Request`;
+    btn.disabled = false;
+    btn.className = 'btn btn-amber';
+    btn.onclick = ()=>{ window.location.href = 'wallet.html'; };
+    return;
+  }
+  if(requested){
+    btn.textContent = 'Requested ✓';
+    btn.disabled = true;
+    btn.className = 'btn btn-outline';
+  } else {
+    btn.textContent = 'Request';
+    btn.disabled = false;
+    btn.className = 'btn btn-primary';
+    btn.onclick = async ()=>{
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      const riderDoc = await db.collection('users').doc(currentUser.uid).get();
+      await db.collection('orders').doc(orderId).collection('requests').doc(currentUser.uid).set({
+        riderId: currentUser.uid,
+        riderName: riderDoc.data().name,
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      setRequestButton(true);
+    };
+  }
+}
+
+window.addEventListener('beforeunload', ()=>{
+  if(watchId) navigator.geolocation.clearWatch(watchId);
+  stopEtaCountdown();
+});
+</script>
+</body>
+</html>

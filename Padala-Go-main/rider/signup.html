@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Become a Rider · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="content auth-wrap">
+    <div class="brand-mark">
+      <div class="dot" style="background:var(--teal); color:#fff;">P</div>
+      <span>Padala Go <span style="color:var(--amber);">Rider</span></span>
+    </div>
+
+    <h1>Become a rider</h1>
+    <p style="color:#6C7A78; font-size:14px; margin-top:0;">Create your rider account.</p>
+
+    <div id="errorBanner" class="error-banner"></div>
+
+    <form id="signupForm" style="margin-top:20px;">
+      <div class="field">
+        <label for="name">Full name</label>
+        <input type="text" id="name" placeholder="Juan Dela Cruz" required>
+      </div>
+      <div class="field">
+        <label for="phone">Mobile number</label>
+        <input type="tel" id="phone" placeholder="09XX XXX XXXX" required>
+      </div>
+      <div class="field">
+        <label for="plate">Motorbike plate number</label>
+        <input type="text" id="plate" placeholder="e.g. ABC 1234" required>
+      </div>
+      <div class="field">
+        <label for="motorColor">Motorbike color</label>
+        <input type="text" id="motorColor" placeholder="e.g. Red" required>
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="you@email.com" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="At least 6 characters" minlength="6" required>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="signUpBtn">Sign Up</button>
+    </form>
+
+    <p style="text-align:center; font-size:13.5px; color:#6C7A78; margin-top:18px;">
+      Already a rider? <a href="index.html" style="color:var(--teal); font-weight:600;">Sign in</a>
+    </p>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const form = document.getElementById('signupForm');
+const errorBanner = document.getElementById('errorBanner');
+const signUpBtn = document.getElementById('signUpBtn');
+
+form.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  errorBanner.style.display = "none";
+  signUpBtn.disabled = true;
+  signUpBtn.innerHTML = '<span class="spinner"></span> Creating account…';
+
+  const name = document.getElementById('name').value.trim();
+  const phone = document.getElementById('phone').value.trim();
+  const plate = document.getElementById('plate').value.trim();
+  const motorColor = document.getElementById('motorColor').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  try{
+    const cred = await auth.createUserWithEmailAndPassword(email, password);
+    await db.collection('users').doc(cred.user.uid).set({
+      name, phone, plate, motorColor, email,
+      role: 'rider',
+      walletBalance: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    window.location.href = "orders.html";
+  } catch(err){
+    errorBanner.textContent = friendlyError(err.code);
+    errorBanner.style.display = "block";
+    signUpBtn.disabled = false;
+    signUpBtn.textContent = "Sign Up";
+  }
+});
+
+function friendlyError(code){
+  switch(code){
+    case 'auth/email-already-in-use': return "That email is already registered. Try signing in instead.";
+    case 'auth/invalid-email': return "That email address doesn't look right.";
+    case 'auth/weak-password': return "Password should be at least 6 characters.";
+    default: return "Couldn't create your account. Please check your details and try again.";
+  }
+}
+</script>
+</body>
+</html>

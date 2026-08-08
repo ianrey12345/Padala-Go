@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Status · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  #trackMap{ height:220px; }
+  .live-dot{
+    width:8px; height:8px; border-radius:50%; background:var(--green);
+    display:inline-block; position:relative;
+  }
+  .live-dot::after{
+    content:""; position:absolute; inset:-4px; border-radius:50%;
+    border:2px solid var(--green); opacity:0.6;
+    animation:livePulse 1.6s ease-out infinite;
+  }
+  @keyframes livePulse{
+    0%{ transform:scale(0.4); opacity:0.7; }
+    100%{ transform:scale(1.8); opacity:0; }
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar plain">
+    <a href="my-orders.html" class="back">← My Orders</a>
+    <h1 style="color:#fff; font-size:19px;">Order Status</h1>
+  </div>
+
+  <div class="content" id="content">
+    <div class="order-card" id="orderCard">Loading order…</div>
+
+    <div id="requestsSection" style="margin-top:20px; display:none;">
+      <h3 style="font-size:15px;">Riders who requested this delivery</h3>
+      <div id="requestsList"></div>
+    </div>
+
+    <div id="confirmedSection" style="margin-top:20px; display:none;">
+      <div class="order-card">
+        <div class="top-row">
+          <span class="status-badge status-confirmed">Rider confirmed</span>
+        </div>
+        <div class="route" id="confirmedRiderName"></div>
+        <div class="route" id="confirmedRiderVehicle"></div>
+        <a href="#" id="chatWithRiderBtn" class="btn btn-outline btn-sm" style="margin-top:10px; text-decoration:none; display:inline-flex;">💬 Chat with Rider</a>
+      </div>
+
+      <div class="order-card" id="mapCard" style="display:none; margin-top:10px; padding:0; overflow:hidden;">
+        <div style="padding:14px 16px 0;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="live-dot"></span>
+            <span style="font-weight:700; font-size:13.5px; color:var(--teal-dark);" id="trackTitle">Live rider location</span>
+          </div>
+          <div style="font-size:12px; color:#8A8178; margin:2px 0 10px;" id="trackHint">Waiting for your rider's location…</div>
+        </div>
+        <div id="trackMap"></div>
+        <div class="map-legend" style="padding:10px 16px;">
+          <span><span class="pin-dot" style="background:#F0A93A;"></span>Rider</span>
+          <span><span class="pin-dot" style="background:#2F8F5B;"></span>Pickup</span>
+          <span>🏁 Drop-off</span>
+        </div>
+      </div>
+
+      <div class="order-card" id="etaBanner" style="display:none; margin-top:10px; background:#EAF3FF; border-color:#C7DEFF;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:22px;">⏱️</div>
+          <div>
+            <div style="font-weight:700; color:#2A5FAD; font-size:13.5px;" id="etaText">Calculating arrival time…</div>
+            <div style="font-size:12px; color:#8A8178;" id="etaSub"></div>
+          </div>
+        </div>
+      </div>
+      <div class="order-card" id="arrivedBanner" style="display:none; margin-top:10px; background:#FDF1DC; border-color:#F0D9A8;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:22px;">🛵</div>
+          <div>
+            <div style="font-weight:700; color:#B67A16; font-size:13.5px;">Your rider has arrived at the pickup point</div>
+            <div style="font-size:12px; color:#8A8178;" id="arrivedTime"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const orderId = params.get('id');
+let currentUser = null;
+let currentOrderData = null;
+
+requireAuth(user=>{
+  currentUser = user;
+  watchForNewRequests(user.uid);
+  watchForRiderArrival(user.uid);
+  watchForOrderCompletion(user.uid);
+  if(!orderId){ window.location.href = "my-orders.html"; return; }
+  listenToOrder();
+});
+
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+/* ---------------------------------------------------------
+   Live rider-location tracking map. The rider's app writes
+   `riderLocation` onto this order doc every few seconds
+   (see broadcastRiderLocation() in rider/active-delivery.html);
+   we just render whatever the latest snapshot gives us.
+   --------------------------------------------------------- */
+let trackMap = null;
+let trackRiderMarker = null;
+let trackPickupMarker = null;
+let trackDropoffMarker = null;
+let trackMapReady = false;
+
+const trackRiderIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#F0A93A;border:2px solid #082F2B;box-shadow:0 0 0 2px #fff;"></div>',
+  iconSize: [16,16], iconAnchor: [8,8]
+});
+const trackPickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#2F8F5B;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [18,18], iconAnchor: [9,9]
+});
+const trackDropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:20px;line-height:1;">🏁</div>',
+  iconSize: [20,20], iconAnchor: [10,20]
+});
+
+function ensureTrackMap(o){
+  if(trackMapReady) return;
+  trackMapReady = true;
+  trackMap = L.map('trackMap', { zoomControl: true }).setView([o.pickup.lat, o.pickup.lng], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(trackMap);
+  trackPickupMarker = L.marker([o.pickup.lat, o.pickup.lng], { icon: trackPickupIcon, title: 'Pickup: ' + o.pickup.address }).addTo(trackMap);
+  trackDropoffMarker = L.marker([o.dropoff.lat, o.dropoff.lng], { icon: trackDropoffIcon, title: 'Drop-off: ' + o.dropoff.address }).addTo(trackMap);
+}
+
+function updateTrackingMap(o){
+  const mapCard = document.getElementById('mapCard');
+  const trackTitle = document.getElementById('trackTitle');
+  const trackHint = document.getElementById('trackHint');
+
+  // Only show live tracking while there's an assigned rider actively en route.
+  if(!o.riderId || o.status === 'completed' || o.status === 'cancelled'){
+    mapCard.style.display = 'none';
+    return;
+  }
+
+  mapCard.style.display = 'block';
+  ensureTrackMap(o);
+
+  const boundsPoints = [
+    [o.pickup.lat, o.pickup.lng],
+    [o.dropoff.lat, o.dropoff.lng]
+  ];
+
+  if(o.riderLocation){
+    const pos = [o.riderLocation.lat, o.riderLocation.lng];
+    if(!trackRiderMarker){
+      trackRiderMarker = L.marker(pos, { icon: trackRiderIcon, title: 'Your rider', zIndexOffset: 1000 }).addTo(trackMap);
+    } else {
+      trackRiderMarker.setLatLng(pos);
+    }
+    boundsPoints.push(pos);
+
+    trackHint.textContent = o.status === 'in_progress'
+      ? "Your rider is on the way to the drop-off point."
+      : (o.arrivedAtPickup ? "Your rider is waiting at the pickup point." : "Your rider is on the way to the pickup point.");
+  } else {
+    trackHint.textContent = "Waiting for your rider's location…";
+  }
+
+  trackTitle.textContent = o.status === 'in_progress' ? 'Live rider location · heading to drop-off' : 'Live rider location · heading to pickup';
+
+  // fitBounds needs a real size for the container — invalidateSize covers the
+  // first render right after the card goes from display:none to visible.
+  trackMap.invalidateSize();
+  trackMap.fitBounds(boundsPoints, { padding: [40, 40] });
+}
+
+let etaDeadlineMs = null;
+let etaCountdownTimer = null;
+
+function startEtaCountdown(){
+  if(etaCountdownTimer) return; // already ticking — recalibration just moved the deadline
+  tickEtaCountdown();
+  etaCountdownTimer = setInterval(tickEtaCountdown, 1000);
+}
+
+function stopEtaCountdown(){
+  if(etaCountdownTimer){
+    clearInterval(etaCountdownTimer);
+    etaCountdownTimer = null;
+  }
+  etaDeadlineMs = null;
+}
+
+function tickEtaCountdown(){
+  if(etaDeadlineMs === null) return;
+  const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
+  const etaText = document.getElementById('etaText');
+  if(!etaText) return;
+  if(secsLeft <= 0){
+    etaText.textContent = "Rider arriving any moment…";
+  } else {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    etaText.textContent = m > 0
+      ? `Rider arriving in ${m}m ${s.toString().padStart(2,'0')}s`
+      : `Rider arriving in ${s}s`;
+  }
+}
+
+function listenToOrder(){
+  db.collection('orders').doc(orderId).onSnapshot(doc=>{
+    if(!doc.exists){
+      document.getElementById('orderCard').textContent = "Order not found.";
+      return;
+    }
+    const o = doc.data();
+    currentOrderData = o;
+    renderOrder(o);
+
+    if(o.status === 'pending'){
+      document.getElementById('requestsSection').style.display = 'block';
+      document.getElementById('confirmedSection').style.display = 'none';
+      document.getElementById('mapCard').style.display = 'none';
+      listenToRequests();
+    } else if(o.status === 'confirmed' || o.status === 'in_progress' || o.status === 'completed'){
+      document.getElementById('requestsSection').style.display = 'none';
+      document.getElementById('confirmedSection').style.display = 'block';
+      document.getElementById('chatWithRiderBtn').href = `chat-thread.html?id=${orderId}`;
+      updateTrackingMap(o);
+      if(o.riderId){
+        db.collection('users').doc(o.riderId).get().then(rd=>{
+          if(rd.exists){
+            const r = rd.data();
+            document.getElementById('confirmedRiderName').textContent = `Rider: ${r.name}`;
+            const vehicleBits = [];
+            if(r.motorColor) vehicleBits.push(r.motorColor);
+            if(r.plate) vehicleBits.push(`Plate ${r.plate}`);
+            document.getElementById('confirmedRiderVehicle').textContent =
+              vehicleBits.length ? `🏍️ ${vehicleBits.join(' · ')}` : '';
+          }
+        });
+      }
+
+      const etaBanner = document.getElementById('etaBanner');
+      if(o.status === 'confirmed' && !o.arrivedAtPickup && o.riderLocation && o.pickup){
+        const km = distanceKmBetween(o.riderLocation, { lat: o.pickup.lat, lng: o.pickup.lng });
+        const mins = Math.max(1, Math.round((km / 25) * 60)); // same assumed speed as the rider's live map
+        etaBanner.style.display = 'block';
+        document.getElementById('etaSub').textContent = `${km.toFixed(1)} km away`;
+        // Recalibrate the countdown deadline against this fresh location fix —
+        // keeps the per-second tick honest as the rider's actual position updates.
+        etaDeadlineMs = Date.now() + mins * 60000;
+        startEtaCountdown();
+      } else {
+        etaBanner.style.display = 'none';
+        stopEtaCountdown();
+      }
+
+      const arrivedBanner = document.getElementById('arrivedBanner');
+      if(o.arrivedAtPickup){
+        arrivedBanner.style.display = 'block';
+        document.getElementById('arrivedTime').textContent = o.arrivedAtPickupAt ? timeAgo(o.arrivedAtPickupAt) : '';
+        stopEtaCountdown();
+      } else {
+        arrivedBanner.style.display = 'none';
+      }
+    }
+  });
+}
+
+function renderOrder(o){
+  document.getElementById('orderCard').innerHTML = `
+    <div class="top-row">
+      <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+      <span class="fare-tag">${fmtPeso(o.fare)}</span>
+    </div>
+    <div class="route">📍 ${o.pickup.address}</div>
+    <div class="route">🎯 ${o.dropoff.address}</div>
+    ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
+    <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+  `;
+}
+
+let unsubRequests = null;
+function listenToRequests(){
+  if(unsubRequests) return;
+  unsubRequests = db.collection('orders').doc(orderId).collection('requests')
+    .where('status','==','pending')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('requestsList');
+      if(snap.empty){
+        list.innerHTML = `<div class="empty-state"><div class="glyph">🔎</div>Waiting for a rider to request this delivery…</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      snap.forEach(async reqDoc=>{
+        const r = reqDoc.data();
+        const row = document.createElement('div');
+        row.className = 'order-card';
+        row.innerHTML = `
+          <div class="rider-request-row" style="border-top:none; padding-top:0;">
+            <div>
+              <div class="name">${r.riderName}</div>
+              <div class="when" id="eta-${reqDoc.id}">${timeAgo(r.createdAt)}</div>
+            </div>
+            <button class="btn btn-amber btn-sm" data-rider-id="${r.riderId}" data-req-id="${reqDoc.id}">Confirm</button>
+          </div>
+        `;
+        row.querySelector('button').addEventListener('click', (e)=>{
+          confirmRider(e.target.dataset.riderId, e.target.dataset.reqId);
+        });
+        list.appendChild(row);
+
+        // Show this rider's estimated time to the pickup point, if their
+        // live location is available — helps the customer choose who to confirm.
+        if(currentOrderData && currentOrderData.pickup){
+          try{
+            const riderDoc = await db.collection('users').doc(r.riderId).get();
+            if(riderDoc.exists && riderDoc.data().liveLocation){
+              const km = distanceKmBetween(riderDoc.data().liveLocation, { lat: currentOrderData.pickup.lat, lng: currentOrderData.pickup.lng });
+              const mins = Math.max(1, Math.round((km / 25) * 60));
+              const etaEl = document.getElementById(`eta-${reqDoc.id}`);
+              if(etaEl) etaEl.textContent = `~${mins} min away (${km.toFixed(1)} km) · requested ${timeAgo(r.createdAt)}`;
+            }
+          } catch(e){ /* leave the default "requested X ago" text */ }
+        }
+      });
+    });
+}
+
+async function confirmRider(riderId, reqId){
+  const batch = db.batch();
+  const orderRef = db.collection('orders').doc(orderId);
+  batch.update(orderRef, {
+    status: 'confirmed',
+    riderId,
+    riderAccepted: null,
+    riderDecisionDeadline: firebase.firestore.Timestamp.fromMillis(Date.now() + 15000)
+  });
+  batch.update(orderRef.collection('requests').doc(reqId), { status: 'accepted' });
+
+  // Decline all other pending requests
+  const others = await orderRef.collection('requests').where('status','==','pending').get();
+  others.forEach(d=>{
+    if(d.id !== reqId){
+      batch.update(d.ref, { status: 'declined' });
+    }
+  });
+
+  await batch.commit();
+}
+</script>
+</body>
+</html>

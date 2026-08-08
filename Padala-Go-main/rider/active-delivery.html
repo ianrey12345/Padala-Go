@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redirecting… · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="content" style="display:flex; align-items:center; justify-content:center; min-height:100vh;">
+    <div style="text-align:center; color:#8A8178;">
+      <span class="spinner" style="border-top-color:var(--teal); border-color:rgba(12,74,69,0.2);"></span>
+      <p style="margin-top:12px;">This page has moved to the <a href="map.html" style="color:var(--teal); font-weight:600;">Map tab</a>…</p>
+    </div>
+  </div>
+</div>
+<script>
+// active-delivery.html is superseded by the persistent Map tab (map.html),
+// which finds the rider's active delivery on its own — kept here as a
+// redirect so any old bookmarks or links still land somewhere useful.
+window.location.replace('map.html');
+</script>
+</body>
+</html>
