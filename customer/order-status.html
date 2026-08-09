@@ -21,6 +21,19 @@
     0%{ transform:scale(0.4); opacity:0.7; }
     100%{ transform:scale(1.8); opacity:0; }
   }
+
+  /* Post-delivery rating */
+  .star-picker{ display:flex; gap:6px; font-size:32px; line-height:1; }
+  .star-picker .star{ color:var(--line); cursor:pointer; transition:color .1s ease; user-select:none; }
+  .star-picker .star.filled{ color:var(--amber); }
+  .star-picker.read-only .star{ cursor:default; font-size:26px; }
+  #ratingComment{
+    width:100%; margin-top:14px; padding:12px 14px; border-radius:12px;
+    border:1.5px solid var(--line); font-family:'Inter'; font-size:14px;
+    resize:vertical; min-height:64px; background:var(--paper); color:var(--ink);
+  }
+  #ratingComment:focus{ outline:none; border-color:var(--teal); }
+  #ratingDoneComment{ font-style:italic; }
 </style>
 </head>
 <body>
@@ -81,6 +94,30 @@
             <div style="font-size:12px; color:#8A8178;" id="arrivedTime"></div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Post-delivery rating — only ever shown once the order is completed -->
+    <div class="order-card" id="ratingSection" style="display:none; margin-top:20px;">
+      <h3 style="font-size:15px; margin-bottom:4px;">Rate your rider</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">How was your delivery experience?</div>
+
+      <div id="ratingPrompt">
+        <div class="star-picker" id="starPicker">
+          <span class="star" data-val="1">★</span>
+          <span class="star" data-val="2">★</span>
+          <span class="star" data-val="3">★</span>
+          <span class="star" data-val="4">★</span>
+          <span class="star" data-val="5">★</span>
+        </div>
+        <textarea id="ratingComment" maxlength="300" placeholder="Anything about the delivery? (optional)"></textarea>
+        <div id="ratingError" class="error-banner" style="margin-top:10px;"></div>
+        <button type="button" class="btn btn-primary btn-sm" id="submitRatingBtn" style="margin-top:12px;" disabled>Submit Rating</button>
+      </div>
+
+      <div id="ratingDone" style="display:none;">
+        <div class="star-picker read-only" id="ratingDoneStars"></div>
+        <div class="hint" id="ratingDoneComment" style="margin-top:8px;"></div>
       </div>
     </div>
   </div>
@@ -224,6 +261,105 @@ function tickEtaCountdown(){
   }
 }
 
+/* ---------------------------------------------------------
+   Post-delivery rating — shown once an order is completed.
+   Stores rating + optional comment on the order doc, and rolls
+   it into a running average (ratingSum / ratingCount) on the
+   rider's user doc via a transaction, so double-submits (e.g.
+   two open tabs) can't double-count.
+   --------------------------------------------------------- */
+let selectedRating = 0;
+let ratingSectionInitialized = false;
+
+function initStarPicker(){
+  if(ratingSectionInitialized) return;
+  ratingSectionInitialized = true;
+  const stars = document.querySelectorAll('#starPicker .star');
+  stars.forEach(star=>{
+    star.addEventListener('click', ()=>{
+      selectedRating = parseInt(star.dataset.val, 10);
+      paintStars(stars, selectedRating);
+      document.getElementById('submitRatingBtn').disabled = false;
+    });
+    star.addEventListener('mouseenter', ()=> paintStars(stars, parseInt(star.dataset.val, 10)));
+  });
+  document.getElementById('starPicker').addEventListener('mouseleave', ()=> paintStars(stars, selectedRating));
+  document.getElementById('submitRatingBtn').addEventListener('click', submitRating);
+}
+
+function paintStars(stars, upTo){
+  stars.forEach(s=> s.classList.toggle('filled', parseInt(s.dataset.val, 10) <= upTo));
+}
+
+async function submitRating(){
+  if(!selectedRating || !currentOrderData || !currentOrderData.riderId) return;
+  const btn = document.getElementById('submitRatingBtn');
+  const errorBox = document.getElementById('ratingError');
+  errorBox.style.display = 'none';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner" style="border-top-color:#fff; border-color:rgba(255,255,255,0.4);"></span> Submitting…';
+
+  const comment = document.getElementById('ratingComment').value.trim();
+  const riderId = currentOrderData.riderId;
+
+  try{
+    await db.runTransaction(async (tx)=>{
+      const orderRef = db.collection('orders').doc(orderId);
+      const riderRef = db.collection('users').doc(riderId);
+
+      const orderSnap = await tx.get(orderRef);
+      if(orderSnap.exists && orderSnap.data().rating){
+        return; // already rated — nothing further to do
+      }
+
+      const riderSnap = await tx.get(riderRef);
+      const prevSum = (riderSnap.exists && riderSnap.data().ratingSum) || 0;
+      const prevCount = (riderSnap.exists && riderSnap.data().ratingCount) || 0;
+
+      tx.update(orderRef, {
+        rating: selectedRating,
+        ratingComment: comment || null,
+        ratedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      tx.set(riderRef, {
+        ratingSum: prevSum + selectedRating,
+        ratingCount: prevCount + 1
+      }, { merge: true });
+    });
+  } catch(err){
+    errorBox.textContent = "Couldn't submit your rating. Please try again.";
+    errorBox.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Submit Rating';
+  }
+}
+
+function renderRatingSection(o){
+  const section = document.getElementById('ratingSection');
+  if(o.status !== 'completed'){
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  initStarPicker();
+
+  const prompt = document.getElementById('ratingPrompt');
+  const done = document.getElementById('ratingDone');
+
+  if(o.rating){
+    prompt.style.display = 'none';
+    done.style.display = 'block';
+    document.getElementById('ratingDoneStars').innerHTML = [1,2,3,4,5]
+      .map(n=> `<span class="star${n <= o.rating ? ' filled' : ''}">★</span>`)
+      .join('');
+    document.getElementById('ratingDoneComment').textContent =
+      o.ratingComment ? `"${o.ratingComment}"` : 'Thanks for your feedback!';
+  } else {
+    prompt.style.display = 'block';
+    done.style.display = 'none';
+  }
+}
+
 function listenToOrder(){
   db.collection('orders').doc(orderId).onSnapshot(doc=>{
     if(!doc.exists){
@@ -233,6 +369,7 @@ function listenToOrder(){
     const o = doc.data();
     currentOrderData = o;
     renderOrder(o);
+    renderRatingSection(o);
 
     if(o.status === 'pending'){
       document.getElementById('requestsSection').style.display = 'block';
