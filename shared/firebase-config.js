@@ -100,6 +100,28 @@ function routeLengthKm(coords){
   return total;
 }
 
+/* Formats a duration given in seconds as "Xm Ys" (or "Xh Ym" once past an
+   hour). Used both for the live "time on this delivery" ticker (fed a
+   growing seconds count) and for the final recorded delivery duration
+   shown once an order is completed (fed a fixed seconds count). */
+function formatDuration(totalSecs){
+  const secs = Math.max(0, Math.round(totalSecs));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if(h > 0) return `${h}h ${m.toString().padStart(2,'0')}m`;
+  return `${m}m ${s.toString().padStart(2,'0')}s`;
+}
+
+/* Formats the time elapsed since `startMs` — shared by the rider's Map
+   tab and Current tab for the running "time on this delivery" timer
+   shown after pickup, in place of the ETA-to-destination countdown used
+   before pickup. */
+function formatElapsedSince(startMs){
+  const secs = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  return formatDuration(secs);
+}
+
 function requireAuth(onReady){
   auth.onAuthStateChanged(user=>{
     if(!user){
@@ -128,23 +150,33 @@ const MIN_BALANCE_TO_TAKE_ORDERS = 30; // riders can't request/accept a new deli
 
 /* Marks an order completed AND deducts the 12% commission from the
    rider's wallet balance, atomically, so the two can never drift apart.
-   Also writes a walletTransactions record for the Statistics page. */
-async function completeOrderWithCommission(orderId, riderId, fare){
+   Also writes a walletTransactions record for the Statistics page.
+   deliveryDurationSecs (optional) is how long the order sat in_progress —
+   pickup ("Lets Go!") to this exact moment — so it can be shown on the
+   completed order everywhere (rider's Current tab, customer's My Orders
+   and Order Status pages) instead of only living as a live ticker that
+   disappears once the delivery is done. */
+async function completeOrderWithCommission(orderId, riderId, fare, deliveryDurationSecs){
   const commission = Math.round(fare * COMMISSION_RATE);
   const orderRef = db.collection('orders').doc(orderId);
   const riderRef = db.collection('users').doc(riderId);
   const txnRef = riderRef.collection('walletTransactions').doc();
+
+  const orderUpdate = {
+    status: 'completed',
+    completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    commissionDeducted: commission
+  };
+  if(typeof deliveryDurationSecs === 'number' && !isNaN(deliveryDurationSecs)){
+    orderUpdate.deliveryDurationSecs = Math.max(0, Math.round(deliveryDurationSecs));
+  }
 
   await db.runTransaction(async (t)=>{
     const riderSnap = await t.get(riderRef);
     const currentBalance = (riderSnap.exists && riderSnap.data().walletBalance) || 0;
     const newBalance = currentBalance - commission;
 
-    t.update(orderRef, {
-      status: 'completed',
-      completedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      commissionDeducted: commission
-    });
+    t.update(orderRef, orderUpdate);
     t.update(riderRef, { walletBalance: newBalance });
     t.set(txnRef, {
       type: 'commission',

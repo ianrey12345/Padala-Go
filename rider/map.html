@@ -130,6 +130,35 @@ let etaDeadlineMs = null;
 let etaCountdownTimer = null;
 let etaDistanceKm = null;
 
+/* ---------------------------------------------------------
+   Running elapsed-time counter, shown once the rider has picked
+   up (status flips to 'in_progress') in place of the ETA
+   countdown above — at that point "how long left" matters less
+   than "how long has this delivery taken so far". Starts from
+   `inProgressAt`, the timestamp written the moment the rider
+   taps "Lets Go!" (see renderStage() below).
+   --------------------------------------------------------- */
+let elapsedStartMs = null;
+let elapsedTimer = null;
+
+function startElapsedTimer(startMs){
+  if(elapsedTimer && elapsedStartMs === startMs) return; // already ticking from the same start point
+  stopElapsedTimer();
+  elapsedStartMs = startMs;
+  tickElapsedTimer();
+  elapsedTimer = setInterval(tickElapsedTimer, 1000);
+}
+function stopElapsedTimer(){
+  if(elapsedTimer){ clearInterval(elapsedTimer); elapsedTimer = null; }
+  elapsedStartMs = null;
+}
+function tickElapsedTimer(){
+  const pill = document.getElementById('etaPill');
+  if(!pill || elapsedStartMs === null) return;
+  const distTxt = etaDistanceKm !== null ? `${etaDistanceKm.toFixed(1)} km left · ` : '';
+  pill.textContent = `${distTxt}On the way · ${formatElapsedSince(elapsedStartMs)} elapsed`;
+}
+
 function startEtaCountdown(){
   if(etaCountdownTimer) return;
   tickEtaCountdown();
@@ -410,6 +439,7 @@ async function updateRouteVisuals(riderPos){
   const dest = currentDestination();
   if(!dest || orderData.status === 'completed'){
     stopEtaCountdown();
+    stopElapsedTimer();
     document.getElementById('etaPill').style.display = 'none';
     return;
   }
@@ -433,15 +463,29 @@ async function updateRouteVisuals(riderPos){
   progressLine = L.polyline(traveled, { color: '#F0A93A', weight: 5, opacity: 0.95 }).addTo(map);
 
   const remainingKm = routeLengthKm(remaining);
-  // Scale the remaining time off OSRM's own duration estimate for this route
-  // (which already accounts for road type/speed limits), rather than a flat
-  // km/h guess — this is what was making our ETA run high vs. Google Maps.
-  const paceMinPerKm = route.distanceKm > 0 ? route.durationMin / route.distanceKm : (60 / ASSUMED_SPEED_KMH);
-  const mins = Math.max(1, Math.round(remainingKm * paceMinPerKm));
   document.getElementById('etaPill').style.display = 'inline-block';
   etaDistanceKm = remainingKm;
-  etaDeadlineMs = Date.now() + mins * 60000;
-  startEtaCountdown();
+
+  if(orderData.status === 'in_progress'){
+    // Past pickup — swap the ETA countdown for a running "time on this
+    // delivery" timer. inProgressAt is written once, the moment the rider
+    // taps "Lets Go!" (see renderStage()); older orders from before this
+    // field existed fall back to "now" so the timer still works, just
+    // starting from whenever the page first saw the in_progress status.
+    stopEtaCountdown();
+    const startMs = orderData.inProgressAt ? orderData.inProgressAt.toMillis() : Date.now();
+    startElapsedTimer(startMs);
+  } else {
+    // Still heading to pickup — keep the countdown-to-arrival estimate.
+    stopElapsedTimer();
+    // Scale the remaining time off OSRM's own duration estimate for this route
+    // (which already accounts for road type/speed limits), rather than a flat
+    // km/h guess — this is what was making our ETA run high vs. Google Maps.
+    const paceMinPerKm = route.distanceKm > 0 ? route.durationMin / route.distanceKm : (60 / ASSUMED_SPEED_KMH);
+    const mins = Math.max(1, Math.round(remainingKm * paceMinPerKm));
+    etaDeadlineMs = Date.now() + mins * 60000;
+    startEtaCountdown();
+  }
 
   // Frame the route once when we first pick it up, so the rider starts out
   // seeing the whole trip — after that, zoom/pan is entirely manual.
@@ -483,6 +527,7 @@ function showEmptyState(){
   document.getElementById('emptyState').style.display = 'flex';
   document.getElementById('bottomPanel').style.display = 'none';
   stopEtaCountdown();
+  stopElapsedTimer();
   orderId = null; orderRef = null; orderData = null;
   boundsFitForOrderId = null;
 }
@@ -514,7 +559,13 @@ function renderStage(){
   } else if(o.status === 'confirmed' && o.arrivedAtPickup){
     actionBtn.textContent = "Lets Go!";
     actionBtn.className = "btn btn-primary";
-    actionBtn.onclick = ()=> orderRef.update({ status: 'in_progress' });
+    // inProgressAt marks the exact moment the delivery leg starts — this is
+    // what the running elapsed-time timer (in place of the ETA countdown)
+    // counts up from once the order flips to in_progress.
+    actionBtn.onclick = ()=> orderRef.update({
+      status: 'in_progress',
+      inProgressAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
   } else if(o.status === 'in_progress'){
     actionBtn.textContent = "Mark Delivered";
     actionBtn.className = "btn btn-amber";
@@ -522,7 +573,13 @@ function renderStage(){
       actionBtn.disabled = true;
       actionBtn.textContent = "Completing…";
       try{
-        const commission = await completeOrderWithCommission(orderId, currentUser.uid, o.fare);
+        // How long the delivery leg actually took, pickup to this moment —
+        // recorded on the order so it survives past this live screen (see
+        // "Delivered in Xm Ys" on Current tab / customer order history).
+        const deliveryDurationSecs = o.inProgressAt
+          ? Math.round((Date.now() - o.inProgressAt.toMillis()) / 1000)
+          : undefined;
+        const commission = await completeOrderWithCommission(orderId, currentUser.uid, o.fare, deliveryDurationSecs);
         showToast(`Delivered! ${fmtPeso(commission)} commission (10%) deducted from your wallet.`);
       } catch(err){
         alert("Couldn't complete the delivery. Please check your connection and try again.");
@@ -543,6 +600,7 @@ document.getElementById('logoutLink').addEventListener('click', async (e)=>{
 window.addEventListener('beforeunload', ()=>{
   if(watchId) navigator.geolocation.clearWatch(watchId);
   stopEtaCountdown();
+  stopElapsedTimer();
 });
 </script>
 </body>

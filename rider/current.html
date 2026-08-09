@@ -191,6 +191,32 @@ function stopEtaCountdown(){
   etaDeadlineMs = null;
 }
 
+/* ---------------------------------------------------------
+   Running elapsed-time counter for the Current tab — mirrors
+   map.html's version. Shown once the order is 'in_progress'
+   (rider tapped "Lets Go!" on the Map tab) in place of the
+   ETA-to-pickup countdown used beforehand.
+   --------------------------------------------------------- */
+let elapsedStartMs = null;
+let elapsedTimer = null;
+
+function startElapsedTimer(startMs){
+  if(elapsedTimer && elapsedStartMs === startMs) return;
+  stopElapsedTimer();
+  elapsedStartMs = startMs;
+  tickElapsedTimer();
+  elapsedTimer = setInterval(tickElapsedTimer, 1000);
+}
+function stopElapsedTimer(){
+  if(elapsedTimer){ clearInterval(elapsedTimer); elapsedTimer = null; }
+  elapsedStartMs = null;
+}
+function tickElapsedTimer(){
+  const etaText = document.getElementById('etaText');
+  if(!etaText || elapsedStartMs === null) return;
+  etaText.textContent = `On the way · ${formatElapsedSince(elapsedStartMs)} elapsed`;
+}
+
 function tickEtaCountdown(){
   if(etaDeadlineMs === null) return;
   const secsLeft = Math.max(0, Math.round((etaDeadlineMs - Date.now()) / 1000));
@@ -228,19 +254,34 @@ function updateEtaDisplay(o){
   if(o.status === 'confirmed' && o.arrivedAtPickup){
     etaBanner.style.display = 'none';
     stopEtaCountdown();
+    stopElapsedTimer();
     arrivedBanner.style.display = 'block';
     document.getElementById('arrivedTime').textContent = o.arrivedAtPickupAt ? timeAgo(o.arrivedAtPickupAt) : '';
     return;
   }
   arrivedBanner.style.display = 'none';
 
-  const dest = o.status === 'in_progress' ? o.dropoff : o.pickup;
+  if(o.status === 'in_progress'){
+    // Past pickup — show a running "time on this delivery" timer instead
+    // of an ETA countdown. inProgressAt is stamped once, the moment the
+    // rider taps "Lets Go!" on the Map tab; older orders from before this
+    // field existed fall back to "now" so the timer still runs.
+    stopEtaCountdown();
+    etaBanner.style.display = 'block';
+    document.getElementById('etaSub').textContent = `Heading to drop-off`;
+    const startMs = o.inProgressAt ? o.inProgressAt.toMillis() : Date.now();
+    startElapsedTimer(startMs);
+    return;
+  }
+
+  stopElapsedTimer();
+  const dest = o.pickup;
 
   if(o.riderLocation && dest){
     const km = distanceKmBetween(o.riderLocation, { lat: dest.lat, lng: dest.lng });
     const mins = Math.max(1, Math.round((km / 25) * 60)); // same assumed 25km/h speed used elsewhere
     etaBanner.style.display = 'block';
-    document.getElementById('etaSub').textContent = `${km.toFixed(1)} km to ${o.status === 'in_progress' ? 'drop-off' : 'pickup'}`;
+    document.getElementById('etaSub').textContent = `${km.toFixed(1)} km to pickup`;
     // Recalibrate the countdown deadline against this fresh location fix.
     etaDeadlineMs = Date.now() + mins * 60000;
     startEtaCountdown();
@@ -284,6 +325,7 @@ function listenToActiveDelivery(){
         document.getElementById('arrivedBanner').style.display = 'none';
         document.getElementById('viewMapBtn').style.display = 'none';
         stopEtaCountdown();
+        stopElapsedTimer();
         currentActiveOrder = null;
         currentActiveOrderId = null;
         activeCustomerPhone = null;
@@ -492,6 +534,7 @@ function renderPastOrders(){
       </div>
       <div class="route">📍 ${o.pickup.address}</div>
       <div class="route">🎯 ${o.dropoff.address}</div>
+      ${typeof o.deliveryDurationSecs === 'number' ? `<div class="route">⏱️ Delivered in ${formatDuration(o.deliveryDurationSecs)}</div>` : ''}
       <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
     `;
     list.appendChild(card);
@@ -515,6 +558,7 @@ document.getElementById('logoutLink').addEventListener('click', async (e)=>{
 
 window.addEventListener('beforeunload', ()=>{
   stopEtaCountdown();
+  stopElapsedTimer();
 });
 </script>
 </body>

@@ -103,6 +103,7 @@ requireAuth(user=>{
           </div>
           <div class="route">📍 ${o.pickup.address}</div>
           <div class="route">🎯 ${o.dropoff.address}</div>
+          ${typeof o.deliveryDurationSecs === 'number' ? `<div class="route">⏱️ Delivered in ${formatDuration(o.deliveryDurationSecs)}</div>` : ''}
           ${ratingBlock}
           <div class="card-footer">
             ${canCancel ? `<button type="button" class="btn btn-outline cancel-btn" data-id="${doc.id}">Cancel Order</button>` : `<span></span>`}
