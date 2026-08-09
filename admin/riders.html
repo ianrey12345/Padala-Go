@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riders · Padala Go Admin</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .topbar-links{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
+  .logout-link{ color:#fff; opacity:0.85; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
+
+  .rider-card{
+    background:var(--paper); border-radius:14px; padding:16px; margin-bottom:12px;
+    box-shadow:var(--shadow); border:1.5px solid var(--line);
+  }
+  .rider-card .name{ font-size:15.5px; font-weight:700; color:var(--teal-dark); }
+  .rider-card .details{ font-size:12.5px; color:#8A8178; margin-top:2px; }
+  .doc-row{ display:flex; gap:10px; margin-top:12px; }
+  .doc-thumb{
+    flex:1; text-align:center; text-decoration:none; color:inherit; cursor:pointer;
+  }
+  .doc-thumb img{
+    width:100%; height:80px; object-fit:cover; border-radius:10px; border:1.5px solid var(--line);
+    background:var(--cream); display:block;
+  }
+  .doc-thumb.profile img{ border-radius:50%; width:80px; height:80px; margin:0 auto; }
+  .doc-thumb .lbl{ font-size:11px; color:#8A8178; margin-top:5px; font-weight:600; }
+  .doc-missing{
+    width:100%; height:80px; border-radius:10px; border:1.5px dashed var(--line);
+    display:flex; align-items:center; justify-content:center; font-size:11px; color:#C7BFB2;
+    background:var(--cream);
+  }
+  .doc-thumb.profile .doc-missing{ border-radius:50%; width:80px; height:80px; margin:0 auto; }
+
+  .lightbox-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.9); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .lightbox-overlay img{ max-width:100%; max-height:100%; border-radius:12px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Admin</div>
+        <h1>Riders</h1>
+        <div class="sub">Profile & license photos on file</div>
+      </div>
+      <div class="topbar-links">
+        <a href="requests.html" class="logout-link">🧾 Refill Requests</a>
+        <a href="order-history.html" class="logout-link">📦 Order History</a>
+        <a href="#" id="logoutLink" class="logout-link">🚪 Log Out</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div id="ridersList">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<div id="lightboxRoot"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+requireAdminAuth(()=>{
+  listenToRiders();
+});
+
+function docThumb(url, label, extraClass){
+  const inner = url
+    ? `<img src="${url}" alt="${label}">`
+    : `<div class="doc-missing">Not uploaded</div>`;
+  return `
+    <div class="doc-thumb ${extraClass || ''}" ${url ? `data-full="${url}"` : ''}>
+      ${inner}
+      <div class="lbl">${label}</div>
+    </div>
+  `;
+}
+
+function listenToRiders(){
+  db.collection('users')
+    .where('role','==','rider')
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('ridersList');
+      if(snap.empty){
+        list.innerHTML = `<div class="empty-state"><div class="glyph">🏍️</div>No riders signed up yet.</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      snap.forEach(doc=>{
+        const r = doc.data();
+        const card = document.createElement('div');
+        card.className = 'rider-card';
+        card.innerHTML = `
+          <div class="name">${r.name || 'Rider'}</div>
+          <div class="details">${r.phone || ''}${r.plate ? ` · Plate ${r.plate}` : ''}${r.motorColor ? ` · ${r.motorColor}` : ''}</div>
+          <div class="doc-row">
+            ${docThumb(r.profilePhotoUrl, 'Profile', 'profile')}
+            ${docThumb(r.licenseFrontUrl, 'License (Front)')}
+            ${docThumb(r.licenseBackUrl, 'License (Back)')}
+          </div>
+        `;
+        card.querySelectorAll('.doc-thumb[data-full]').forEach(el=>{
+          el.addEventListener('click', ()=> openLightbox(el.dataset.full));
+        });
+        list.appendChild(card);
+      });
+    }, err=>{
+      document.getElementById('ridersList').innerHTML =
+        `<div class="empty-state">Couldn't load riders. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
+
+function openLightbox(url){
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.innerHTML = `<img src="${url}" alt="Document photo">`;
+  overlay.addEventListener('click', ()=> overlay.remove());
+  document.getElementById('lightboxRoot').appendChild(overlay);
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>

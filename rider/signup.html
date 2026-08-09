@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -51,6 +51,22 @@
         <input type="password" id="password" placeholder="At least 6 characters" minlength="6" required>
       </div>
 
+      <div class="field">
+        <label for="profilePhoto">Profile picture</label>
+        <input type="file" id="profilePhoto" accept="image/*" capture="user" required>
+        <img id="profilePhotoPreview" style="display:none; margin-top:8px; width:88px; height:88px; border-radius:50%; object-fit:cover; border:1.5px solid var(--line);">
+      </div>
+      <div class="field">
+        <label for="licenseFront">Driver's license — front</label>
+        <input type="file" id="licenseFront" accept="image/*" capture="environment" required>
+        <img id="licenseFrontPreview" style="display:none; margin-top:8px; width:100%; max-width:260px; border-radius:10px; border:1.5px solid var(--line);">
+      </div>
+      <div class="field">
+        <label for="licenseBack">Driver's license — back</label>
+        <input type="file" id="licenseBack" accept="image/*" capture="environment" required>
+        <img id="licenseBackPreview" style="display:none; margin-top:8px; width:100%; max-width:260px; border-radius:10px; border:1.5px solid var(--line);">
+      </div>
+
       <button type="submit" class="btn btn-primary" id="signUpBtn">Sign Up</button>
     </form>
 
@@ -63,11 +79,36 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="../shared/firebase-config.js"></script>
 <script>
 const form = document.getElementById('signupForm');
 const errorBanner = document.getElementById('errorBanner');
 const signUpBtn = document.getElementById('signUpBtn');
+const storage = firebase.storage();
+
+// Wire each file input to show a preview thumbnail as soon as a photo is picked.
+[
+  ['profilePhoto', 'profilePhotoPreview'],
+  ['licenseFront', 'licenseFrontPreview'],
+  ['licenseBack', 'licenseBackPreview']
+].forEach(([inputId, previewId])=>{
+  document.getElementById(inputId).addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    const preview = document.getElementById(previewId);
+    if(!file){ preview.style.display = 'none'; return; }
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+  });
+});
+
+// Uploads one file to riderDocuments/{uid}/{filename} and resolves to its
+// public download URL, which is what gets stored on the rider's user doc.
+async function uploadRiderDoc(uid, filename, file){
+  const ref = storage.ref().child(`riderDocuments/${uid}/${filename}`);
+  await ref.put(file);
+  return ref.getDownloadURL();
+}
 
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -81,18 +122,44 @@ form.addEventListener('submit', async (e)=>{
   const motorColor = document.getElementById('motorColor').value.trim();
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
+  const profilePhotoFile = document.getElementById('profilePhoto').files[0];
+  const licenseFrontFile = document.getElementById('licenseFront').files[0];
+  const licenseBackFile = document.getElementById('licenseBack').files[0];
 
+  let cred;
   try{
-    const cred = await auth.createUserWithEmailAndPassword(email, password);
+    cred = await auth.createUserWithEmailAndPassword(email, password);
+  } catch(err){
+    errorBanner.textContent = friendlyError(err.code);
+    errorBanner.style.display = "block";
+    signUpBtn.disabled = false;
+    signUpBtn.textContent = "Sign Up";
+    return;
+  }
+
+  // Account exists at this point — uploads happen next. If any of these
+  // fail (e.g. flaky connection), the account is still created but the
+  // photos won't be attached; the error message says so explicitly so
+  // the rider knows to retry from a page that lets them re-upload rather
+  // than assuming signup failed outright.
+  try{
+    signUpBtn.innerHTML = '<span class="spinner"></span> Uploading photos…';
+    const [profilePhotoUrl, licenseFrontUrl, licenseBackUrl] = await Promise.all([
+      uploadRiderDoc(cred.user.uid, 'profile.jpg', profilePhotoFile),
+      uploadRiderDoc(cred.user.uid, 'license-front.jpg', licenseFrontFile),
+      uploadRiderDoc(cred.user.uid, 'license-back.jpg', licenseBackFile)
+    ]);
+
     await db.collection('users').doc(cred.user.uid).set({
       name, phone, plate, motorColor, email,
       role: 'rider',
       walletBalance: 0,
+      profilePhotoUrl, licenseFrontUrl, licenseBackUrl,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     window.location.href = "orders.html";
   } catch(err){
-    errorBanner.textContent = friendlyError(err.code);
+    errorBanner.textContent = "Your account was created, but we couldn't upload your photos. Please sign in and try again from Menu.";
     errorBanner.style.display = "block";
     signUpBtn.disabled = false;
     signUpBtn.textContent = "Sign Up";
