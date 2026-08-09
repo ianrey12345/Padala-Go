@@ -6,7 +6,8 @@
 <title>Refill Requests · Padala Go Admin</title>
 <link rel="stylesheet" href="../shared/styles.css">
 <style>
-  .topbar-row{ display:flex; justify-content:space-between; align-items:center; }
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .topbar-links{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
   .logout-link{ color:#fff; opacity:0.85; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
 
   .filter-tabs{
@@ -47,7 +48,10 @@
         <h1>Refill Requests</h1>
         <div class="sub">Review rider wallet top-ups</div>
       </div>
-      <a href="#" id="logoutLink" class="logout-link">🚪 Log Out</a>
+      <div class="topbar-links">
+        <a href="order-history.html" class="logout-link">📦 Order History</a>
+        <a href="#" id="logoutLink" class="logout-link">🚪 Log Out</a>
+      </div>
     </div>
   </div>
 
