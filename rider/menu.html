@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Menu · Padala Go Rider</title>
 <link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .rider-rating{ font-size:12px; color:#8A8178; margin-top:3px; }
+  .rider-rating .stars{ color:var(--amber); letter-spacing:1px; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -26,7 +30,10 @@
     <div class="menu-section">
       <div class="menu-section-title">Account</div>
       <div class="menu-row" id="riderNameRow">
-        <span class="row-label" id="riderName">—</span>
+        <div>
+          <span class="row-label" id="riderName">—</span>
+          <div class="rider-rating" id="riderRating">—</div>
+        </div>
         <span class="row-right"><span class="chevron"></span></span>
       </div>
     </div>
@@ -55,11 +62,32 @@ requireAuth(async (user)=>{
     return;
   }
   document.getElementById('riderName').textContent = doc.data().name || 'Rider';
+  renderRiderRating(doc.data());
+
+  // Live-update the rating as new ones come in while this page is open,
+  // instead of only reflecting whatever it was on page load.
+  db.collection('users').doc(user.uid).onSnapshot(d=>{
+    if(d.exists) renderRiderRating(d.data());
+  });
+
   watchWalletBalance('walletBalanceRow', user.uid);
   watchForRiderConfirmations(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
 });
+
+// ratingSum / ratingCount are maintained by the customer's post-delivery
+// rating flow (see customer/order-status.html) — 5-star scale, 5 is best.
+function renderRiderRating(data){
+  const el = document.getElementById('riderRating');
+  const count = data.ratingCount || 0;
+  if(count === 0){
+    el.textContent = 'No ratings yet';
+    return;
+  }
+  const avg = (data.ratingSum / count).toFixed(2);
+  el.innerHTML = `<span class="stars">★</span> ${avg} <span style="opacity:0.75;">(${count} rating${count === 1 ? '' : 's'})</span>`;
+}
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
   e.preventDefault();
