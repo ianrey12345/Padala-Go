@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Padala Rider">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0C4A45">
 <title>Become a Rider · Padala Go</title>
 <link rel="stylesheet" href="../shared/styles.css">
 </head>
@@ -100,6 +106,16 @@ function friendlyError(code){
     case 'auth/weak-password': return "Password should be at least 6 characters.";
     default: return "Couldn't create your account. Please check your details and try again.";
   }
+}
+</script>
+<script src="../shared/ios-install-banner.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => {
+      console.error('Service worker registration failed:', err);
+    });
+  });
 }
 </script>
 </body>
