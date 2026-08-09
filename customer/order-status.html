@@ -34,6 +34,16 @@
   }
   #ratingComment:focus{ outline:none; border-color:var(--teal); }
   #ratingDoneComment{ font-style:italic; }
+  #dismissRatingBtn{
+    position:absolute; top:12px; right:14px; background:none; border:none;
+    font-size:22px; line-height:1; color:#9B9186; cursor:pointer; padding:4px;
+  }
+  #dismissRatingBtn:hover{ color:var(--red); }
+  .closest-tag{
+    display:inline-block; font-size:10px; font-weight:700; color:var(--green);
+    background:#E9F5EE; padding:2px 7px; border-radius:8px; margin-left:6px; vertical-align:middle;
+  }
+  .rider-rating-line{ font-size:11.5px; color:var(--amber); font-weight:700; margin-top:2px; }
 </style>
 </head>
 <body>
@@ -97,10 +107,12 @@
       </div>
     </div>
 
-    <!-- Post-delivery rating — only ever shown once the order is completed -->
-    <div class="order-card" id="ratingSection" style="display:none; margin-top:20px;">
-      <h3 style="font-size:15px; margin-bottom:4px;">Rate your rider</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">How was your delivery experience?</div>
+    <!-- Post-delivery rating — only ever shown once the order is completed
+         and the customer hasn't already rated or dismissed it -->
+    <div class="order-card" id="ratingSection" style="display:none; margin-top:20px; position:relative;">
+      <button type="button" id="dismissRatingBtn" aria-label="Skip rating" title="Skip rating">×</button>
+      <h3 style="font-size:15px; margin-bottom:4px; padding-right:26px;">Rate your rider</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">How was your delivery experience? (optional)</div>
 
       <div id="ratingPrompt">
         <div class="star-picker" id="starPicker">
@@ -263,10 +275,10 @@ function tickEtaCountdown(){
 
 /* ---------------------------------------------------------
    Post-delivery rating — shown once an order is completed.
-   Stores rating + optional comment on the order doc, and rolls
-   it into a running average (ratingSum / ratingCount) on the
-   rider's user doc via a transaction, so double-submits (e.g.
-   two open tabs) can't double-count.
+   Entirely optional: the customer can rate (stored on the order
+   doc + an immutable per-rider ratings subcollection, see the
+   security rules) or dismiss it with the × button, which sets
+   ratingSkipped so it doesn't keep reappearing on this order.
    --------------------------------------------------------- */
 let selectedRating = 0;
 let ratingSectionInitialized = false;
@@ -285,10 +297,21 @@ function initStarPicker(){
   });
   document.getElementById('starPicker').addEventListener('mouseleave', ()=> paintStars(stars, selectedRating));
   document.getElementById('submitRatingBtn').addEventListener('click', submitRating);
+  document.getElementById('dismissRatingBtn').addEventListener('click', dismissRating);
 }
 
 function paintStars(stars, upTo){
   stars.forEach(s=> s.classList.toggle('filled', parseInt(s.dataset.val, 10) <= upTo));
+}
+
+async function dismissRating(){
+  const btn = document.getElementById('dismissRatingBtn');
+  btn.disabled = true;
+  try{
+    await db.collection('orders').doc(orderId).update({ ratingSkipped: true });
+  } catch(err){
+    btn.disabled = false; // let them try again — section stays open on failure
+  }
 }
 
 async function submitRating(){
@@ -302,30 +325,29 @@ async function submitRating(){
   const comment = document.getElementById('ratingComment').value.trim();
   const riderId = currentOrderData.riderId;
 
+  // A batch, not a transaction — the security rules do the verification
+  // (order really belongs to this customer/rider and is completed, and
+  // the orderId-keyed doc ID makes a duplicate rating impossible), so
+  // there's no need to read anything back first. Both writes land
+  // together or not at all.
+  const batch = db.batch();
+  const orderRef = db.collection('orders').doc(orderId);
+  const ratingRef = db.collection('users').doc(riderId).collection('ratings').doc(orderId);
+
+  batch.update(orderRef, {
+    rating: selectedRating,
+    ratingComment: comment || null,
+    ratedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  batch.set(ratingRef, {
+    rating: selectedRating,
+    comment: comment || null,
+    customerId: currentUser.uid,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
   try{
-    await db.runTransaction(async (tx)=>{
-      const orderRef = db.collection('orders').doc(orderId);
-      const riderRef = db.collection('users').doc(riderId);
-
-      const orderSnap = await tx.get(orderRef);
-      if(orderSnap.exists && orderSnap.data().rating){
-        return; // already rated — nothing further to do
-      }
-
-      const riderSnap = await tx.get(riderRef);
-      const prevSum = (riderSnap.exists && riderSnap.data().ratingSum) || 0;
-      const prevCount = (riderSnap.exists && riderSnap.data().ratingCount) || 0;
-
-      tx.update(orderRef, {
-        rating: selectedRating,
-        ratingComment: comment || null,
-        ratedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      tx.set(riderRef, {
-        ratingSum: prevSum + selectedRating,
-        ratingCount: prevCount + 1
-      }, { merge: true });
-    });
+    await batch.commit();
   } catch(err){
     errorBox.textContent = "Couldn't submit your rating. Please try again.";
     errorBox.style.display = 'block';
@@ -336,7 +358,7 @@ async function submitRating(){
 
 function renderRatingSection(o){
   const section = document.getElementById('ratingSection');
-  if(o.status !== 'completed'){
+  if(o.status !== 'completed' || o.ratingSkipped){
     section.style.display = 'none';
     return;
   }
@@ -435,27 +457,83 @@ function renderOrder(o){
   `;
 }
 
+// When two riders' requests are within this many km of each other's
+// distance to the pickup point, treat them as "equally close" and let
+// rating decide who's shown first instead of the tiny distance gap.
+const NEAR_THRESHOLD_KM = 0.5;
+
 let unsubRequests = null;
 function listenToRequests(){
   if(unsubRequests) return;
   unsubRequests = db.collection('orders').doc(orderId).collection('requests')
     .where('status','==','pending')
-    .onSnapshot(snap=>{
+    .onSnapshot(async snap=>{
       const list = document.getElementById('requestsList');
       if(snap.empty){
         list.innerHTML = `<div class="empty-state"><div class="glyph">🔎</div>Waiting for a rider to request this delivery…</div>`;
         return;
       }
-      list.innerHTML = '';
-      snap.forEach(async reqDoc=>{
+
+      // Gather each rider's distance-to-pickup and average rating before
+      // rendering anything, so the whole list can be sorted at once:
+      // nearest to pickup first, and — when two riders are close enough
+      // that distance alone doesn't clearly separate them — whoever has
+      // the better rating goes first.
+      const enriched = await Promise.all(snap.docs.map(async reqDoc=>{
         const r = reqDoc.data();
+        let km = null;
+        let avgRating = null;
+        let ratingCount = 0;
+
+        if(currentOrderData && currentOrderData.pickup){
+          try{
+            const riderDoc = await db.collection('users').doc(r.riderId).get();
+            if(riderDoc.exists && riderDoc.data().liveLocation){
+              km = distanceKmBetween(riderDoc.data().liveLocation, { lat: currentOrderData.pickup.lat, lng: currentOrderData.pickup.lng });
+            }
+          } catch(e){ /* leave km as null — sorts to the back */ }
+        }
+
+        try{
+          const ratingsSnap = await db.collection('users').doc(r.riderId).collection('ratings').get();
+          if(!ratingsSnap.empty){
+            let sum = 0;
+            ratingsSnap.forEach(d=> sum += d.data().rating);
+            avgRating = sum / ratingsSnap.size;
+            ratingCount = ratingsSnap.size;
+          }
+        } catch(e){ /* leave avgRating as null — treated as unrated */ }
+
+        return { reqDoc, r, km, avgRating, ratingCount };
+      }));
+
+      enriched.sort((a, b)=>{
+        const aKm = a.km === null ? Infinity : a.km;
+        const bKm = b.km === null ? Infinity : b.km;
+        if(Math.abs(aKm - bKm) <= NEAR_THRESHOLD_KM){
+          const aRating = a.avgRating === null ? 0 : a.avgRating;
+          const bRating = b.avgRating === null ? 0 : b.avgRating;
+          if(aRating !== bRating) return bRating - aRating; // higher rating first
+        }
+        return aKm - bKm; // otherwise, nearest to pickup first
+      });
+
+      list.innerHTML = '';
+      enriched.forEach(({ reqDoc, r, km, avgRating, ratingCount }, idx)=>{
         const row = document.createElement('div');
         row.className = 'order-card';
+        const distanceText = km !== null
+          ? `~${Math.max(1, Math.round((km / 25) * 60))} min away (${km.toFixed(1)} km) · requested ${timeAgo(r.createdAt)}`
+          : `requested ${timeAgo(r.createdAt)}`;
+        const ratingText = avgRating !== null
+          ? `★ ${avgRating.toFixed(2)} (${ratingCount} rating${ratingCount === 1 ? '' : 's'})`
+          : 'No ratings yet';
         row.innerHTML = `
           <div class="rider-request-row" style="border-top:none; padding-top:0;">
             <div>
-              <div class="name">${r.riderName}</div>
-              <div class="when" id="eta-${reqDoc.id}">${timeAgo(r.createdAt)}</div>
+              <div class="name">${r.riderName}${idx === 0 && km !== null ? ' <span class="closest-tag">Closest match</span>' : ''}</div>
+              <div class="when">${distanceText}</div>
+              <div class="rider-rating-line">${ratingText}</div>
             </div>
             <button class="btn btn-amber btn-sm" data-rider-id="${r.riderId}" data-req-id="${reqDoc.id}">Confirm</button>
           </div>
@@ -464,20 +542,6 @@ function listenToRequests(){
           confirmRider(e.target.dataset.riderId, e.target.dataset.reqId);
         });
         list.appendChild(row);
-
-        // Show this rider's estimated time to the pickup point, if their
-        // live location is available — helps the customer choose who to confirm.
-        if(currentOrderData && currentOrderData.pickup){
-          try{
-            const riderDoc = await db.collection('users').doc(r.riderId).get();
-            if(riderDoc.exists && riderDoc.data().liveLocation){
-              const km = distanceKmBetween(riderDoc.data().liveLocation, { lat: currentOrderData.pickup.lat, lng: currentOrderData.pickup.lng });
-              const mins = Math.max(1, Math.round((km / 25) * 60));
-              const etaEl = document.getElementById(`eta-${reqDoc.id}`);
-              if(etaEl) etaEl.textContent = `~${mins} min away (${km.toFixed(1)} km) · requested ${timeAgo(r.createdAt)}`;
-            }
-          } catch(e){ /* leave the default "requested X ago" text */ }
-        }
       });
     });
 }

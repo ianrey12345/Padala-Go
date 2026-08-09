@@ -62,12 +62,12 @@ requireAuth(async (user)=>{
     return;
   }
   document.getElementById('riderName').textContent = doc.data().name || 'Rider';
-  renderRiderRating(doc.data());
 
-  // Live-update the rating as new ones come in while this page is open,
-  // instead of only reflecting whatever it was on page load.
-  db.collection('users').doc(user.uid).onSnapshot(d=>{
-    if(d.exists) renderRiderRating(d.data());
+  // Live-update the rating as new ones come in while this page is open.
+  // Ratings live in an immutable per-rider subcollection (not a running
+  // total on the user doc itself) — see the Firestore rules for why.
+  db.collection('users').doc(user.uid).collection('ratings').onSnapshot(snap=>{
+    renderRiderRating(snap);
   });
 
   watchWalletBalance('walletBalanceRow', user.uid);
@@ -76,17 +76,18 @@ requireAuth(async (user)=>{
   watchForNewMessages(user.uid);
 });
 
-// ratingSum / ratingCount are maintained by the customer's post-delivery
-// rating flow (see customer/order-status.html) — 5-star scale, 5 is best.
-function renderRiderRating(data){
+// Each doc in the subcollection is one customer's rating (see
+// customer/order-status.html) — 5-star scale, 5 is best.
+function renderRiderRating(snap){
   const el = document.getElementById('riderRating');
-  const count = data.ratingCount || 0;
-  if(count === 0){
+  if(snap.empty){
     el.textContent = 'No ratings yet';
     return;
   }
-  const avg = (data.ratingSum / count).toFixed(2);
-  el.innerHTML = `<span class="stars">★</span> ${avg} <span style="opacity:0.75;">(${count} rating${count === 1 ? '' : 's'})</span>`;
+  let sum = 0;
+  snap.forEach(d=> sum += d.data().rating);
+  const avg = (sum / snap.size).toFixed(2);
+  el.innerHTML = `<span class="stars">★</span> ${avg} <span style="opacity:0.75;">(${snap.size} rating${snap.size === 1 ? '' : 's'})</span>`;
 }
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
