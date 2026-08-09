@@ -360,7 +360,7 @@ function processToastQueue(){
       toastShowing = false;
       processToastQueue();
     }, 250);
-  }, 2500);
+  }, 5000);
 }
 
 function requestNotificationPermission(){
