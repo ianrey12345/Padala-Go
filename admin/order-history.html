@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order History · Padala Go Admin</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .topbar-links{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
+  .logout-link{ color:#fff; opacity:0.85; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
+
+  .filter-tabs{
+    display:flex; gap:6px; margin-bottom:14px; background:var(--paper); border-radius:14px;
+    padding:5px; box-shadow:var(--shadow); overflow-x:auto;
+  }
+  .filter-tab{
+    flex:1; text-align:center; padding:9px 4px; border-radius:10px; font-size:12px; font-weight:700;
+    color:#8A8178; cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:center; gap:5px;
+    white-space:nowrap;
+  }
+  .filter-tab.active{ background:var(--teal); color:#fff; }
+  .filter-tab .count{
+    font-family:'Space Mono'; font-size:11px; background:rgba(0,0,0,0.08); padding:1px 6px; border-radius:10px;
+  }
+  .filter-tab.active .count{ background:rgba(255,255,255,0.25); }
+
+  .bulk-bar{
+    display:none; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--paper); border-radius:14px; padding:12px 14px; margin-bottom:16px;
+    box-shadow:var(--shadow); border:1.5px solid var(--line);
+  }
+  .bulk-bar .txt{ font-size:12.5px; color:#586866; font-weight:600; }
+  .bulk-bar .btn{ width:auto; padding:9px 16px; font-size:12.5px; }
+
+  .card-footer{ display:flex; justify-content:space-between; align-items:center; margin-top:10px; }
+  .age-tag{ font-family:'Space Mono'; font-size:11.5px; color:#8A8178; }
+  .delete-btn{
+    width:auto; padding:8px 14px; font-size:12.5px; border-color:var(--red); color:var(--red); margin-top:10px;
+  }
+  .delete-btn:hover{ background:#FCEBEB; }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:18px; padding:26px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal-card .note{ font-size:13px; color:#8A8178; margin:8px 0 20px; line-height:1.4; }
+  .modal-actions{ display:flex; gap:10px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Admin</div>
+        <h1>Order History</h1>
+        <div class="sub">Completed & cancelled orders from both apps</div>
+      </div>
+      <div class="topbar-links">
+        <a href="requests.html" class="logout-link">🧾 Refill Requests</a>
+        <a href="#" id="logoutLink" class="logout-link">🚪 Log Out</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="filter-tabs" id="filterTabs">
+      <div class="filter-tab active" data-filter="all">All <span class="count" id="count-all">0</span></div>
+      <div class="filter-tab" data-filter="recent">Under 7d <span class="count" id="count-recent">0</span></div>
+      <div class="filter-tab" data-filter="mid">7–29d <span class="count" id="count-mid">0</span></div>
+      <div class="filter-tab" data-filter="old">30d+ <span class="count" id="count-old">0</span></div>
+    </div>
+
+    <div class="bulk-bar" id="bulkBar">
+      <div class="txt"><span id="bulkCount">0</span> order(s) shown in this filter</div>
+      <button type="button" class="btn btn-outline" id="bulkDeleteBtn" style="border-color:var(--red); color:var(--red);">🗑️ Delete All Shown</button>
+    </div>
+
+    <div id="ordersList">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+function serviceLabel(s){ return s === 'padala_pabili' ? 'Padala / Pabili' : 'Bike Delivery'; }
+
+let currentAdmin = null;
+let allPastOrders = []; // [{ id, o, ageDays }]
+let activeFilter = 'all';
+
+requireAdminAuth((user, adminData)=>{
+  currentAdmin = user;
+  listenToOrders();
+});
+
+/* Age is measured from whichever terminal timestamp the order actually
+   has — completedAt for a finished delivery, cancelledAt for a cancelled
+   one, falling back to createdAt for older records from before those
+   fields existed. null only if even createdAt is somehow missing. */
+function ageDaysOf(o){
+  const ts = o.completedAt || o.cancelledAt || o.createdAt;
+  if(!ts) return null;
+  return Math.floor((Date.now() - ts.toDate().getTime()) / 86400000);
+}
+
+function matchesFilter(item, filter){
+  if(filter === 'all') return true;
+  const days = item.ageDays === null ? Infinity : item.ageDays; // unknown age treated as old, so it's still reachable for cleanup
+  if(filter === 'recent') return days < 7;
+  if(filter === 'mid') return days >= 7 && days < 30;
+  if(filter === 'old') return days >= 30;
+  return true;
+}
+
+function listenToOrders(){
+  db.collection('orders')
+    .where('status','in', ['completed','cancelled'])
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      allPastOrders = snap.docs.map(doc=>{
+        const o = doc.data();
+        return { id: doc.id, o, ageDays: ageDaysOf(o) };
+      });
+      updateFilterCounts();
+      renderList();
+    }, err=>{
+      document.getElementById('ordersList').innerHTML =
+        `<div class="empty-state">Couldn't load order history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
+
+function updateFilterCounts(){
+  const counts = { all: allPastOrders.length, recent: 0, mid: 0, old: 0 };
+  allPastOrders.forEach(item=>{
+    ['recent','mid','old'].forEach(f=>{
+      if(matchesFilter(item, f)) counts[f]++;
+    });
+  });
+  document.getElementById('count-all').textContent = counts.all;
+  document.getElementById('count-recent').textContent = counts.recent;
+  document.getElementById('count-mid').textContent = counts.mid;
+  document.getElementById('count-old').textContent = counts.old;
+}
+
+function renderList(){
+  const list = document.getElementById('ordersList');
+  const filtered = allPastOrders.filter(item=> matchesFilter(item, activeFilter));
+
+  const bulkBar = document.getElementById('bulkBar');
+  if(filtered.length > 0){
+    bulkBar.style.display = 'flex';
+    document.getElementById('bulkCount').textContent = filtered.length;
+  } else {
+    bulkBar.style.display = 'none';
+  }
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No orders in this range.</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  filtered.forEach(item=>{
+    const { id, o, ageDays } = item;
+    const ageText = ageDays === null ? 'age unknown' : ageDays === 0 ? 'today' : `${ageDays} day${ageDays === 1 ? '' : 's'} ago`;
+
+    const card = document.createElement('div');
+    card.className = 'order-card';
+    card.innerHTML = `
+      <div class="top-row">
+        <span class="service-tag">${serviceLabel(o.serviceType)}</span>
+        <span class="fare-tag">${fmtPeso(o.fare)}</span>
+      </div>
+      <div class="route">📍 ${o.pickup.address}</div>
+      <div class="route">🎯 ${o.dropoff.address}</div>
+      ${typeof o.deliveryDurationSecs === 'number' ? `<div class="route">⏱️ Delivered in ${formatDuration(o.deliveryDurationSecs)}</div>` : ''}
+      <div class="card-footer">
+        <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+        <span class="age-tag">${ageText}</span>
+      </div>
+      <button type="button" class="btn btn-outline delete-btn" data-id="${id}">🗑️ Delete Permanently</button>
+    `;
+    card.querySelector('.delete-btn').addEventListener('click', ()=>{
+      showDeleteModal([{ id, o }]);
+    });
+    list.appendChild(card);
+  });
+}
+
+document.getElementById('filterTabs').querySelectorAll('.filter-tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    if(tab.dataset.filter === activeFilter) return;
+    activeFilter = tab.dataset.filter;
+    document.getElementById('filterTabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    renderList();
+  });
+});
+
+document.getElementById('bulkDeleteBtn').addEventListener('click', ()=>{
+  const filtered = allPastOrders.filter(item=> matchesFilter(item, activeFilter));
+  if(!filtered.length) return;
+  showDeleteModal(filtered.map(item=> ({ id: item.id, o: item.o })));
+});
+
+function showDeleteModal(items){
+  const count = items.length;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div style="font-size:30px;">🗑️</div>
+      <div style="font-weight:700; font-size:16px; color:var(--teal-dark); margin-top:6px;">
+        Permanently delete ${count === 1 ? 'this order' : `${count} orders`}?
+      </div>
+      <div class="note">
+        This removes ${count === 1 ? 'it' : 'them'} — plus any chat messages, delivery requests, and rider rating
+        attached — from both the customer and rider apps for good. This can't be undone.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="modalKeepBtn">Keep</button>
+        <button class="btn btn-primary" id="modalDeleteBtn" style="background:var(--red);">Delete</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').appendChild(overlay);
+
+  overlay.querySelector('#modalKeepBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#modalDeleteBtn').addEventListener('click', async ()=>{
+    const btn = overlay.querySelector('#modalDeleteBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try{
+      for(const item of items){
+        await deleteOrderCompletely(item.id, item.o);
+      }
+      overlay.remove();
+    } catch(err){
+      overlay.remove();
+      console.error('Order deletion failed:', err);
+      alert(err && err.message ? `Couldn't finish deleting: ${err.message}` : "Couldn't delete. Please try again.");
+    }
+  });
+}
+
+/* Deletes an order and everything hanging off it — its requests
+   subcollection, its messages subcollection, and (if it had one) the
+   rider's rating doc for it — so nothing orphaned is left behind once
+   the order itself is gone. Firestore batches cap at 500 writes; chunked
+   defensively in case a single order ever accumulates an unusually large
+   message history. */
+async function deleteOrderCompletely(orderId, o){
+  const orderRef = db.collection('orders').doc(orderId);
+  const [requestsSnap, messagesSnap] = await Promise.all([
+    orderRef.collection('requests').get(),
+    orderRef.collection('messages').get()
+  ]);
+
+  const refs = [];
+  requestsSnap.forEach(d=> refs.push(d.ref));
+  messagesSnap.forEach(d=> refs.push(d.ref));
+  if(o.riderId){
+    // Deleting a doc that doesn't exist (no rating was ever left) is a
+    // harmless no-op in Firestore, so this is safe to always include.
+    refs.push(db.collection('users').doc(o.riderId).collection('ratings').doc(orderId));
+  }
+  refs.push(orderRef);
+
+  const CHUNK = 450;
+  for(let i = 0; i < refs.length; i += CHUNK){
+    const batch = db.batch();
+    refs.slice(i, i + CHUNK).forEach(ref=> batch.delete(ref));
+    await batch.commit();
+  }
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>
