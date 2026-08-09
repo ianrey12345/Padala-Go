@@ -1,3 +1,21 @@
+// Locks pinch-zoom and double-tap-zoom on every page that includes this
+// script, without needing to edit each page's own <meta name="viewport">
+// tag by hand. Runs immediately (not on DOMContentLoaded) since the
+// viewport meta tag already exists in <head> by the time this script
+// (loaded near the end of <body>) executes.
+(function () {
+  var viewport = document.querySelector('meta[name="viewport"]');
+  var content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
+  if (viewport) {
+    viewport.setAttribute("content", content);
+  } else {
+    viewport = document.createElement("meta");
+    viewport.setAttribute("name", "viewport");
+    viewport.setAttribute("content", content);
+    document.head.appendChild(viewport);
+  }
+})();
+
 // Shows a one-time "Add to Home Screen" tip to iOS Safari visitors who
 // haven't installed the PWA yet. Safe no-op on Android/desktop/already-installed.
 (function () {

@@ -33,7 +33,7 @@
 }
 
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
+html,body{margin:0;padding:0;touch-action:manipulation;}
 body{
   background:var(--cream);
   color:var(--ink);
@@ -108,7 +108,7 @@ h1,h2,h3{
 }
 .field input, .field textarea, .field select{
   width:100%; padding:13px 14px; border-radius:12px; border:1.5px solid var(--line);
-  background:var(--paper); font-size:15px; font-family:'Inter'; color:var(--ink);
+  background:var(--paper); font-size:16px; font-family:'Inter'; color:var(--ink);
 }
 .field input:focus, .field textarea:focus, .field select:focus{
   outline:none; border-color:var(--teal);
