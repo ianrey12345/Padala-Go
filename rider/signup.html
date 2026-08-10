@@ -79,13 +79,20 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="../shared/firebase-config.js"></script>
 <script>
 const form = document.getElementById('signupForm');
 const errorBanner = document.getElementById('errorBanner');
 const signUpBtn = document.getElementById('signUpBtn');
-const storage = firebase.storage();
+
+// Free image hosting via Cloudinary's unsigned upload API — no backend
+// server needed, safe to call directly from the browser. CLOUD_NAME and
+// UPLOAD_PRESET are both public identifiers (not secrets): the upload
+// preset is what actually enforces "unsigned, images only" server-side
+// in the Cloudinary dashboard, so exposing these two values in client
+// code is the intended, documented way to use this API.
+const CLOUDINARY_CLOUD_NAME = "YOUR_CLOUDINARY_CLOUD_NAME";
+const CLOUDINARY_UPLOAD_PRESET = "YOUR_UPLOAD_PRESET";
 
 // Wire each file input to show a preview thumbnail as soon as a photo is picked.
 [
@@ -102,12 +109,27 @@ const storage = firebase.storage();
   });
 });
 
-// Uploads one file to riderDocuments/{uid}/{filename} and resolves to its
-// public download URL, which is what gets stored on the rider's user doc.
+// Uploads one file to Cloudinary and resolves to its public HTTPS URL,
+// which is what gets stored on the rider's user doc — same shape as the
+// old Firebase Storage version, just a different backend behind it.
 async function uploadRiderDoc(uid, filename, file){
-  const ref = storage.ref().child(`riderDocuments/${uid}/${filename}`);
-  await ref.put(file);
-  return ref.getDownloadURL();
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  // Folders riderDocuments/{uid} keep each rider's three photos grouped
+  // together in the Cloudinary media library, same layout as before.
+  formData.append('folder', `riderDocuments/${uid}`);
+  formData.append('public_id', filename.replace(/\.[^/.]+$/, ''));
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+    method: 'POST',
+    body: formData
+  });
+  if(!res.ok){
+    throw new Error(`Cloudinary upload failed (${res.status})`);
+  }
+  const data = await res.json();
+  return data.secure_url;
 }
 
 form.addEventListener('submit', async (e)=>{
