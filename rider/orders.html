@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -129,6 +129,10 @@ requireAuth(async user=>{
     // wrong role for this app — send to rider sign-in
     await auth.signOut();
     window.location.href = "index.html";
+    return;
+  }
+  if(doc.data().verificationStatus !== 'approved'){
+    window.location.href = "pending-review.html";
     return;
   }
   const firstName = (doc.data().name || "").split(" ")[0];

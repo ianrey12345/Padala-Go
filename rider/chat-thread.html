@@ -72,6 +72,10 @@ requireAuth(async user=>{
     window.location.href = "index.html";
     return;
   }
+  if(doc.data().verificationStatus !== 'approved'){
+    window.location.href = "pending-review.html";
+    return;
+  }
   myName = doc.data().name || 'Rider';
 
   if(chatType === 'community'){

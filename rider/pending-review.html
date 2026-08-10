@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Padala Rider">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0C4A45">
+<title>Application Status · Padala Go Rider</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .status-wrap{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:100vh; padding:32px 24px; text-align:center;
+  }
+  .status-glyph{ font-size:52px; margin-bottom:18px; }
+  .status-wrap h1{ font-size:21px; margin-bottom:8px; }
+  .status-wrap p{ color:#6C7A78; font-size:14.5px; line-height:1.5; max-width:320px; }
+  .reason-box{
+    background:var(--paper); border:1.5px solid var(--line); border-radius:14px;
+    padding:14px 16px; margin-top:16px; text-align:left; max-width:320px;
+    font-size:13.5px; color:var(--ink);
+  }
+  .reason-box .lbl{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;
+    color:#8A8178; margin-bottom:4px;
+  }
+  .status-wrap .btn{ margin-top:24px; max-width:220px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="status-wrap" id="statusWrap">
+    <span class="spinner" style="border-top-color:var(--teal); border-color:rgba(12,74,69,0.2); width:26px; height:26px;"></span>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+const statusWrap = document.getElementById('statusWrap');
+let currentUser = null;
+
+requireAuth(user=>{
+  currentUser = user;
+  // Live listener, not a one-time get — so the moment an admin approves
+  // or rejects this application, the screen updates on its own with no
+  // refresh needed. This is also what catches an already-approved rider
+  // who lands here directly (e.g. an old bookmark) and bounces them on.
+  db.collection('users').doc(user.uid).onSnapshot(doc=>{
+    if(!doc.exists || doc.data().role !== 'rider'){
+      auth.signOut();
+      window.location.href = "index.html";
+      return;
+    }
+    render(doc.data());
+  }, ()=>{
+    statusWrap.innerHTML = `<div class="status-glyph">⚠️</div><h1>Couldn't load your status</h1><p>Check your connection and try reloading.</p>`;
+  });
+});
+
+function render(rider){
+  const status = rider.verificationStatus;
+
+  if(status === 'approved'){
+    window.location.href = "orders.html";
+    return;
+  }
+
+  if(status === 'rejected'){
+    statusWrap.innerHTML = `
+      <div class="status-glyph">🚫</div>
+      <h1>Application not approved</h1>
+      <p>We weren't able to verify your rider application this time.</p>
+      ${rider.rejectionReason ? `
+        <div class="reason-box">
+          <div class="lbl">Reason</div>
+          ${escapeHtml(rider.rejectionReason)}
+        </div>
+      ` : ''}
+      <button type="button" class="btn btn-outline" id="signOutBtn">Log Out</button>
+    `;
+    document.getElementById('signOutBtn').addEventListener('click', doSignOut);
+    return;
+  }
+
+  // Default / anything else (including missing field on older accounts): pending.
+  statusWrap.innerHTML = `
+    <div class="status-glyph">🔍</div>
+    <h1>Reviewing your application</h1>
+    <p>We're checking your profile photo and driver's license. This usually doesn't take long — this page will update automatically once it's decided.</p>
+    <button type="button" class="btn btn-outline" id="signOutBtn">Log Out</button>
+  `;
+  document.getElementById('signOutBtn').addEventListener('click', doSignOut);
+}
+
+async function doSignOut(){
+  await auth.signOut();
+  window.location.href = "index.html";
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+<script src="../shared/ios-install-banner.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => {
+      console.error('Service worker registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>

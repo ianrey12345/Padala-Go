@@ -10,10 +10,26 @@
   .topbar-links{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
   .logout-link{ color:#fff; opacity:0.85; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
 
+  .filter-tabs{
+    display:flex; gap:6px; margin-bottom:16px; background:var(--paper); border-radius:14px;
+    padding:5px; box-shadow:var(--shadow); overflow-x:auto;
+  }
+  .filter-tab{
+    flex:1; text-align:center; padding:9px 4px; border-radius:10px; font-size:12px; font-weight:700;
+    color:#8A8178; cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:center; gap:5px;
+    white-space:nowrap;
+  }
+  .filter-tab.active{ background:var(--teal); color:#fff; }
+  .filter-tab .count{
+    font-family:'Space Mono'; font-size:11px; background:rgba(0,0,0,0.08); padding:1px 6px; border-radius:10px;
+  }
+  .filter-tab.active .count{ background:rgba(255,255,255,0.25); }
+
   .rider-card{
     background:var(--paper); border-radius:14px; padding:16px; margin-bottom:12px;
     box-shadow:var(--shadow); border:1.5px solid var(--line);
   }
+  .rider-card .top-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
   .rider-card .name{ font-size:15.5px; font-weight:700; color:var(--teal-dark); }
   .rider-card .details{ font-size:12.5px; color:#8A8178; margin-top:2px; }
   .doc-row{ display:flex; gap:10px; margin-top:12px; }
@@ -33,11 +49,42 @@
   }
   .doc-thumb.profile .doc-missing{ border-radius:50%; width:80px; height:80px; margin:0 auto; }
 
+  .status-approved{ background:#E9F5EE; color:var(--green); }
+  .status-pending{ background:#FDF1DC; color:#B67A16; }
+  .status-rejected{ background:#FCEBEB; color:var(--red); }
+
+  .rejection-note{
+    font-size:12.5px; color:var(--red); background:#FCEBEB; border-radius:10px;
+    padding:8px 10px; margin-top:10px;
+  }
+
+  .rider-actions{ display:flex; gap:10px; margin-top:12px; }
+  .btn-approve{ background:var(--green); color:#fff; }
+  .btn-approve:hover{ background:#25774A; }
+  .btn-reject{ background:transparent; color:var(--red); border:1.5px solid var(--red); }
+  .btn-reject:hover{ background:#FCEBEB; }
+
   .lightbox-overlay{
     position:fixed; inset:0; background:rgba(8,47,43,0.9); z-index:1000;
     display:flex; align-items:center; justify-content:center; padding:20px;
   }
   .lightbox-overlay img{ max-width:100%; max-height:100%; border-radius:12px; }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:18px; padding:26px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal-card .note{ font-size:13px; color:#8A8178; margin:8px 0 14px; line-height:1.4; }
+  .modal-card textarea{
+    width:100%; padding:12px 13px; border-radius:12px; border:1.5px solid var(--line);
+    font-size:14px; font-family:'Inter'; resize:vertical; min-height:70px; margin-bottom:16px;
+  }
+  .modal-card textarea:focus{ outline:none; border-color:var(--red); }
+  .modal-actions{ display:flex; gap:10px; }
 </style>
 </head>
 <body>
@@ -47,7 +94,7 @@
       <div>
         <div class="eyebrow">Padala Go Admin</div>
         <h1>Riders</h1>
-        <div class="sub">Profile & license photos on file</div>
+        <div class="sub">Review applications & documents on file</div>
       </div>
       <div class="topbar-links">
         <a href="requests.html" class="logout-link">🧾 Refill Requests</a>
@@ -58,6 +105,13 @@
   </div>
 
   <div class="content">
+    <div class="filter-tabs" id="filterTabs">
+      <div class="filter-tab active" data-filter="pending">Pending <span class="count" id="count-pending">0</span></div>
+      <div class="filter-tab" data-filter="approved">Approved <span class="count" id="count-approved">0</span></div>
+      <div class="filter-tab" data-filter="rejected">Rejected <span class="count" id="count-rejected">0</span></div>
+      <div class="filter-tab" data-filter="all">All <span class="count" id="count-all">0</span></div>
+    </div>
+
     <div id="ridersList">
       <div class="empty-state">Loading…</div>
     </div>
@@ -65,12 +119,16 @@
 </div>
 
 <div id="lightboxRoot"></div>
+<div id="modalRoot"></div>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="../shared/firebase-config.js"></script>
 <script>
+let allRiders = []; // [{ id, r }]
+let activeFilter = 'pending';
+
 requireAdminAuth(()=>{
   listenToRiders();
 });
@@ -87,39 +145,143 @@ function docThumb(url, label, extraClass){
   `;
 }
 
+// Older accounts created before verification existed have no field at
+// all — treat that the same as 'pending' rather than letting them fall
+// through every filter silently.
+function statusOf(r){
+  return r.verificationStatus || 'pending';
+}
+
+function matchesFilter(r, filter){
+  if(filter === 'all') return true;
+  return statusOf(r) === filter;
+}
+
 function listenToRiders(){
   db.collection('users')
     .where('role','==','rider')
     .orderBy('createdAt','desc')
     .onSnapshot(snap=>{
-      const list = document.getElementById('ridersList');
-      if(snap.empty){
-        list.innerHTML = `<div class="empty-state"><div class="glyph">🏍️</div>No riders signed up yet.</div>`;
-        return;
-      }
-      list.innerHTML = '';
-      snap.forEach(doc=>{
-        const r = doc.data();
-        const card = document.createElement('div');
-        card.className = 'rider-card';
-        card.innerHTML = `
-          <div class="name">${r.name || 'Rider'}</div>
-          <div class="details">${r.phone || ''}${r.plate ? ` · Plate ${r.plate}` : ''}${r.motorColor ? ` · ${r.motorColor}` : ''}</div>
-          <div class="doc-row">
-            ${docThumb(r.profilePhotoUrl, 'Profile', 'profile')}
-            ${docThumb(r.licenseFrontUrl, 'License (Front)')}
-            ${docThumb(r.licenseBackUrl, 'License (Back)')}
-          </div>
-        `;
-        card.querySelectorAll('.doc-thumb[data-full]').forEach(el=>{
-          el.addEventListener('click', ()=> openLightbox(el.dataset.full));
-        });
-        list.appendChild(card);
-      });
+      allRiders = snap.docs.map(doc=> ({ id: doc.id, r: doc.data() }));
+      updateCounts();
+      renderList();
     }, err=>{
       document.getElementById('ridersList').innerHTML =
         `<div class="empty-state">Couldn't load riders. Check the browser console for a Firestore index link if this is your first time here.</div>`;
     });
+}
+
+function updateCounts(){
+  const counts = { all: allRiders.length, pending: 0, approved: 0, rejected: 0 };
+  allRiders.forEach(({ r })=>{ counts[statusOf(r)] = (counts[statusOf(r)] || 0) + 1; });
+  document.getElementById('count-all').textContent = counts.all;
+  document.getElementById('count-pending').textContent = counts.pending;
+  document.getElementById('count-approved').textContent = counts.approved;
+  document.getElementById('count-rejected').textContent = counts.rejected;
+}
+
+function renderList(){
+  const list = document.getElementById('ridersList');
+  const filtered = allRiders.filter(({ r })=> matchesFilter(r, activeFilter));
+
+  if(filtered.length === 0){
+    const labels = {
+      pending: 'No pending applications right now.',
+      approved: 'No approved riders yet.',
+      rejected: 'No rejected applications.',
+      all: 'No riders signed up yet.'
+    };
+    list.innerHTML = `<div class="empty-state"><div class="glyph">🏍️</div>${labels[activeFilter]}</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  filtered.forEach(({ id, r })=>{
+    const status = statusOf(r);
+    const card = document.createElement('div');
+    card.className = 'rider-card';
+    card.innerHTML = `
+      <div class="top-row">
+        <div>
+          <div class="name">${escapeHtml(r.name || 'Rider')}</div>
+          <div class="details">${escapeHtml(r.phone || '')}${r.plate ? ` · Plate ${escapeHtml(r.plate)}` : ''}${r.motorColor ? ` · ${escapeHtml(r.motorColor)}` : ''}</div>
+        </div>
+        <span class="status-badge status-${status}">${status}</span>
+      </div>
+      <div class="doc-row">
+        ${docThumb(r.profilePhotoUrl, 'Profile', 'profile')}
+        ${docThumb(r.licenseFrontUrl, 'License (Front)')}
+        ${docThumb(r.licenseBackUrl, 'License (Back)')}
+      </div>
+      ${status === 'rejected' && r.rejectionReason ? `<div class="rejection-note">Reason: ${escapeHtml(r.rejectionReason)}</div>` : ''}
+      <div class="rider-actions">
+        ${status !== 'approved' ? `<button type="button" class="btn btn-approve btn-sm" style="flex:1;" data-action="approve">Approve</button>` : ''}
+        ${status !== 'rejected' ? `<button type="button" class="btn btn-reject btn-sm" style="flex:1;" data-action="reject">Reject</button>` : ''}
+      </div>
+    `;
+
+    card.querySelectorAll('.doc-thumb[data-full]').forEach(el=>{
+      el.addEventListener('click', ()=> openLightbox(el.dataset.full));
+    });
+
+    const approveBtn = card.querySelector('[data-action="approve"]');
+    if(approveBtn){
+      approveBtn.addEventListener('click', ()=> setStatus(id, 'approved'));
+    }
+    const rejectBtn = card.querySelector('[data-action="reject"]');
+    if(rejectBtn){
+      rejectBtn.addEventListener('click', ()=> showRejectModal(id, r.name));
+    }
+
+    list.appendChild(card);
+  });
+}
+
+async function setStatus(riderId, status, reason){
+  const update = { verificationStatus: status };
+  if(status === 'rejected'){
+    update.rejectionReason = reason || '';
+  } else {
+    // Clear out any old rejection note once a rider is approved, so a
+    // later re-rejection can't accidentally show a stale reason.
+    update.rejectionReason = firebase.firestore.FieldValue.delete();
+  }
+  await db.collection('users').doc(riderId).update(update);
+}
+
+function showRejectModal(riderId, riderName){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div style="font-size:30px;">🚫</div>
+      <div style="font-weight:700; font-size:16px; color:var(--teal-dark); margin-top:6px;">
+        Reject ${escapeHtml(riderName || 'this rider')}'s application?
+      </div>
+      <div class="note">This reason will be shown to the applicant.</div>
+      <textarea id="rejectReasonInput" placeholder="e.g. License photo is blurry — please re-upload a clearer photo of both sides."></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="modalCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="modalRejectBtn" style="background:var(--red);">Reject</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalRoot').appendChild(overlay);
+
+  overlay.querySelector('#modalCancelBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#modalRejectBtn').addEventListener('click', async ()=>{
+    const reason = overlay.querySelector('#rejectReasonInput').value.trim();
+    const btn = overlay.querySelector('#modalRejectBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try{
+      await setStatus(riderId, 'rejected', reason);
+      overlay.remove();
+    } catch(err){
+      overlay.remove();
+      alert("Couldn't reject this application. Please try again.");
+    }
+  });
 }
 
 function openLightbox(url){
@@ -128,6 +290,22 @@ function openLightbox(url){
   overlay.innerHTML = `<img src="${url}" alt="Document photo">`;
   overlay.addEventListener('click', ()=> overlay.remove());
   document.getElementById('lightboxRoot').appendChild(overlay);
+}
+
+document.getElementById('filterTabs').querySelectorAll('.filter-tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    if(tab.dataset.filter === activeFilter) return;
+    activeFilter = tab.dataset.filter;
+    document.getElementById('filterTabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    renderList();
+  });
+});
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{

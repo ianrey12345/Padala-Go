@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -65,7 +65,7 @@ auth.onAuthStateChanged(async user=>{
   if(user){
     const doc = await db.collection('users').doc(user.uid).get();
     if(doc.exists && doc.data().role === 'rider'){
-      window.location.href = "orders.html";
+      window.location.href = doc.data().verificationStatus === 'approved' ? "orders.html" : "pending-review.html";
     }
   }
 });
@@ -90,7 +90,7 @@ form.addEventListener('submit', async (e)=>{
       signInBtn.textContent = "Sign In";
       return;
     }
-    window.location.href = "orders.html";
+    window.location.href = doc.data().verificationStatus === 'approved' ? "orders.html" : "pending-review.html";
   } catch(err){
     errorBanner.textContent = friendlyError(err.code);
     errorBanner.style.display = "block";
