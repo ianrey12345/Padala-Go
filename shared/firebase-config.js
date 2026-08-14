@@ -207,11 +207,16 @@ async function completeOrderWithCommission(orderId, riderId, fare, deliveryDurat
   return commission;
 }
 
-/* Rider submits a top-up amount — this does NOT credit the wallet yet.
-   It creates a pending request that an admin must approve. */
-async function submitRefillRequest(riderId, riderName, amount){
+/* Rider submits a top-up amount plus their GCash reference number and
+   the sender name on the GCash account they paid from (which may not
+   match their rider account name, e.g. a family member's GCash) — this
+   does NOT credit the wallet yet. It creates a pending request that an
+   admin must check against their own GCash transaction history before
+   approving. */
+async function submitRefillRequest(riderId, riderName, amount, gcashRef, gcashSenderName){
   return db.collection('refillRequests').add({
     riderId, riderName, amount,
+    gcashRef, gcashSenderName,
     status: 'pending',
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });

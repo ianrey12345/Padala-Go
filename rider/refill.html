@@ -42,6 +42,20 @@
       <div class="amount" id="bigBalance">₱0.00</div>
     </div>
 
+    <div class="menu-section" style="padding:16px;">
+      <div style="font-weight:700; font-size:14.5px; color:var(--teal-dark); margin-bottom:8px;">💸 Pay via GCash</div>
+      <div style="font-size:13px; color:#586866; line-height:1.5; margin-bottom:10px;">
+        Send your top-up amount to the GCash account below, then fill in the details from your GCash receipt so it can be confirmed.
+      </div>
+      <div style="text-align:center; margin-bottom:10px;">
+        <img src="gcash-qr.png" alt="GCash QR code" style="width:160px; height:160px; border-radius:12px; border:1.5px solid var(--line);" onerror="this.style.display='none'">
+      </div>
+      <div style="text-align:center; font-family:'Space Mono'; font-weight:700; font-size:16px; color:var(--teal-dark);">
+        09693934017
+      </div>
+      <div style="text-align:center; font-size:12.5px; color:#8A8178;">Padala Go (GCash account name)</div>
+    </div>
+
     <div id="successBanner" class="success-banner"></div>
     <div id="errorBanner" class="error-banner"></div>
 
@@ -60,11 +74,21 @@
       <input type="number" id="customAmount" placeholder="e.g. 250" min="1" step="1">
     </div>
 
+    <div class="field">
+      <label for="gcashRef">GCash Reference Number</label>
+      <input type="text" id="gcashRef" placeholder="e.g. 1234 567 890123">
+    </div>
+
+    <div class="field">
+      <label for="gcashSenderName">Sender Name (as shown in GCash)</label>
+      <input type="text" id="gcashSenderName" placeholder="Name on the GCash account you paid from">
+    </div>
+
     <button type="button" class="btn btn-primary" id="refillBtn" style="margin-top:6px;" disabled>
       Confirm Top Up
     </button>
 
-    <div class="hint" style="margin-top:10px;">Refills are reviewed by an admin before they're added to your balance. This is a simulated top-up for now — no real payment method is connected yet.</div>
+    <div class="hint" style="margin-top:10px;">Refills are reviewed by an admin before they're added to your balance.</div>
 
     <h3 style="font-size:15px; margin:22px 0 8px;">Your Pending Requests</h3>
     <div id="pendingList">
@@ -93,6 +117,12 @@ let currentUser = null;
 let riderName = 'Rider';
 let selectedAmount = null;
 
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 requireAuth(async (user)=>{
   currentUser = user;
   const doc = await db.collection('users').doc(user.uid).get();
@@ -115,9 +145,24 @@ requireAuth(async (user)=>{
 
 const chipRow = document.getElementById('chipRow');
 const customAmount = document.getElementById('customAmount');
+const gcashRefInput = document.getElementById('gcashRef');
+const gcashSenderNameInput = document.getElementById('gcashSenderName');
 const refillBtn = document.getElementById('refillBtn');
 const errorBanner = document.getElementById('errorBanner');
 const successBanner = document.getElementById('successBanner');
+
+// Confirm Top Up only enables once an amount is picked AND both GCash
+// fields are filled in — all three are required for an admin to be able
+// to actually verify the payment against their own GCash history.
+function updateRefillBtnState(){
+  refillBtn.disabled = !(
+    selectedAmount &&
+    gcashRefInput.value.trim() &&
+    gcashSenderNameInput.value.trim()
+  );
+}
+gcashRefInput.addEventListener('input', updateRefillBtnState);
+gcashSenderNameInput.addEventListener('input', updateRefillBtnState);
 
 chipRow.querySelectorAll('.amount-chip').forEach(chip=>{
   chip.addEventListener('click', ()=>{
@@ -125,20 +170,15 @@ chipRow.querySelectorAll('.amount-chip').forEach(chip=>{
     chip.classList.add('active');
     customAmount.value = '';
     selectedAmount = parseInt(chip.dataset.amount, 10);
-    refillBtn.disabled = false;
+    updateRefillBtnState();
   });
 });
 
 customAmount.addEventListener('input', ()=>{
   chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
   const val = parseFloat(customAmount.value);
-  if(val > 0){
-    selectedAmount = val;
-    refillBtn.disabled = false;
-  } else {
-    selectedAmount = null;
-    refillBtn.disabled = true;
-  }
+  selectedAmount = val > 0 ? val : null;
+  updateRefillBtnState();
 });
 
 refillBtn.addEventListener('click', ()=>{
@@ -147,6 +187,8 @@ refillBtn.addEventListener('click', ()=>{
 });
 
 function showConfirmModal(amount){
+  const gcashRef = gcashRefInput.value.trim();
+  const gcashSenderName = gcashSenderNameInput.value.trim();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
@@ -154,6 +196,7 @@ function showConfirmModal(amount){
       <div style="font-size:30px;">💰</div>
       <div class="note" style="margin-bottom:2px;">Refill your wallet with</div>
       <div class="amount">${fmtPeso(amount)}</div>
+      <div class="note">Ref #${escapeHtml(gcashRef)} · from ${escapeHtml(gcashSenderName)}</div>
       <div class="note">This will be sent to an admin for approval. Your balance won't update until it's approved.</div>
       <div class="modal-actions">
         <button class="btn btn-outline" id="modalCancelBtn">Cancel</button>
@@ -169,12 +212,14 @@ function showConfirmModal(amount){
     confirmBtn.disabled = true;
     confirmBtn.innerHTML = '<span class="spinner"></span>';
     try{
-      await submitRefillRequest(currentUser.uid, riderName, amount);
+      await submitRefillRequest(currentUser.uid, riderName, amount, gcashRef, gcashSenderName);
       overlay.remove();
       successBanner.textContent = `Refill request for ${fmtPeso(amount)} submitted — waiting for admin approval.`;
       successBanner.style.display = 'block';
       errorBanner.style.display = 'none';
       customAmount.value = '';
+      gcashRefInput.value = '';
+      gcashSenderNameInput.value = '';
       chipRow.querySelectorAll('.amount-chip').forEach(c=>c.classList.remove('active'));
       selectedAmount = null;
       refillBtn.disabled = true;
@@ -208,6 +253,7 @@ function listenToPendingRequests(riderId){
             <span class="fare-tag">${fmtPeso(r.amount)}</span>
           </div>
           <div class="route">Requested ${r.createdAt ? timeAgo(r.createdAt) : 'just now'}</div>
+          ${r.gcashRef ? `<div class="route">Ref #${escapeHtml(r.gcashRef)} · ${escapeHtml(r.gcashSenderName || '')}</div>` : ''}
           <button class="btn btn-outline btn-sm" style="margin-top:8px;" data-id="${doc.id}">Cancel Request</button>
         `;
         row.querySelector('button').addEventListener('click', async (e)=>{
