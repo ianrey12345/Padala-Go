@@ -60,7 +60,7 @@ function render(){
   verifyWrap.innerHTML = `
     <div class="verify-glyph">📩</div>
     <h1>Check your email</h1>
-    <p>We sent a verification link to <span class="verify-email-addr">${escapeHtml(currentUser.email)}</span>. Click the link, then come back here — this page updates on its own once it's verified.</p>
+    <p>We sent a verification link to <span class="verify-email-addr">${escapeHtml(currentUser.email)}</span>. Click the link if cannot find the email check the spam folder, then come back here — this page updates on its own once it's verified.</p>
     <button type="button" class="btn btn-primary" id="resendBtn">Resend Email</button>
     <button type="button" class="ghost-link" id="signOutLink">Wrong email? Log out and try again</button>
   `;
