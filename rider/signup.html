@@ -180,7 +180,8 @@ form.addEventListener('submit', async (e)=>{
       verificationStatus: 'pending',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    window.location.href = "pending-review.html";
+    await cred.user.sendEmailVerification().catch(()=>{});
+    window.location.href = "verify-email.html";
   } catch(err){
     errorBanner.textContent = "Your account was created, but we couldn't upload your photos. Please sign in and try again from Menu.";
     errorBanner.style.display = "block";

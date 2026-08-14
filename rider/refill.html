@@ -44,17 +44,19 @@
 
     <div class="menu-section" style="padding:16px;">
       <div style="font-weight:700; font-size:14.5px; color:var(--teal-dark); margin-bottom:8px;">💸 Pay via GCash</div>
-      <div style="font-size:13px; color:#586866; line-height:1.5; margin-bottom:10px;">
+      <div style="font-size:13px; color:#586866; line-height:1.5; margin-bottom:12px;">
         Send your top-up amount to the GCash account below, then fill in the details from your GCash receipt so it can be confirmed.
       </div>
-      <div style="text-align:center; margin-bottom:10px;">
-        <img src="gcash-qr.png" alt="GCash QR code" style="width:160px; height:160px; border-radius:12px; border:1.5px solid var(--line);" onerror="this.style.display='none'">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div>
+          <div style="font-family:'Space Mono'; font-weight:700; font-size:16px; color:var(--teal-dark);">0917 000 0000</div>
+          <div style="font-size:12.5px; color:#8A8178;">Padala Go (GCash account name)</div>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" id="showQrBtn" style="flex-shrink:0;">Show QR Code</button>
       </div>
-      <div style="text-align:center; font-family:'Space Mono'; font-weight:700; font-size:16px; color:var(--teal-dark);">
-        09693934017
-      </div>
-      <div style="text-align:center; font-size:12.5px; color:#8A8178;">Padala Go (I** R** D.)</div>
     </div>
+
+    <div id="qrModalRoot"></div>
 
     <div id="successBanner" class="success-banner"></div>
     <div id="errorBanner" class="error-banner"></div>
@@ -162,6 +164,22 @@ function updateRefillBtnState(){
   );
 }
 gcashRefInput.addEventListener('input', updateRefillBtnState);
+
+document.getElementById('showQrBtn').addEventListener('click', ()=>{
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <img src="gcash-qr.png" alt="GCash QR code" style="width:100%; max-width:260px; border-radius:12px; border:1.5px solid var(--line);" onerror="this.replaceWith(Object.assign(document.createElement('div'), {textContent: 'QR code image not set up yet — use the number above instead.', style: 'padding:30px 10px; color:#8A8178; font-size:13px;'}))">
+      <div style="font-family:'Space Mono'; font-weight:700; font-size:16px; color:var(--teal-dark); margin-top:14px;">0917 000 0000</div>
+      <div style="font-size:12.5px; color:#8A8178; margin-bottom:18px;">Padala Go (GCash account name)</div>
+      <button class="btn btn-outline" id="closeQrBtn">Close</button>
+    </div>
+  `;
+  document.getElementById('qrModalRoot').appendChild(overlay);
+  overlay.addEventListener('click', (e)=>{ if(e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#closeQrBtn').addEventListener('click', ()=> overlay.remove());
+});
 gcashSenderNameInput.addEventListener('input', updateRefillBtnState);
 
 chipRow.querySelectorAll('.amount-chip').forEach(chip=>{

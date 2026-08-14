@@ -123,12 +123,22 @@ function formatElapsedSince(startMs){
 }
 
 function requireAuth(onReady){
-  auth.onAuthStateChanged(user=>{
+  auth.onAuthStateChanged(async user=>{
     if(!user){
       window.location.href = "index.html";
-    } else {
-      onReady(user);
+      return;
     }
+    // Reload before checking emailVerified — the flag on the cached user
+    // object can be stale if verification happened in another tab/session
+    // since this one last signed in. This is what makes "closed the app
+    // and came back later while still unverified" correctly re-check
+    // every time, not just right after signup.
+    await user.reload().catch(()=>{});
+    if(!user.emailVerified){
+      window.location.href = "verify-email.html";
+      return;
+    }
+    onReady(user);
   });
 }
 

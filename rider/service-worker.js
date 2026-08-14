@@ -8,6 +8,7 @@ const CACHE_NAME = "padala-rider-v1";
 const APP_SHELL = [
   "/rider/index.html",
   "/rider/signup.html",
+  "/rider/verify-email.html",
   "/rider/pending-review.html",
   "/rider/orders.html",
   "/rider/order-detail.html",

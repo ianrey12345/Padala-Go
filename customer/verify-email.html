@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Padala Go">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0C4A45">
+<title>Verify Your Email · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .verify-wrap{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:100vh; padding:32px 24px; text-align:center;
+  }
+  .verify-glyph{ font-size:52px; margin-bottom:18px; }
+  .verify-wrap h1{ font-size:21px; margin-bottom:8px; }
+  .verify-wrap p{ color:#6C7A78; font-size:14.5px; line-height:1.5; max-width:320px; }
+  .verify-email-addr{ font-weight:700; color:var(--teal-dark); }
+  .verify-wrap .btn{ margin-top:20px; max-width:260px; }
+  .verify-wrap .ghost-link{
+    margin-top:16px; font-size:13px; color:#8A8178; text-decoration:underline; cursor:pointer; background:none; border:none;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="verify-wrap" id="verifyWrap">
+    <span class="spinner" style="border-top-color:var(--teal); border-color:rgba(12,74,69,0.2); width:26px; height:26px;"></span>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+// Deliberately NOT requireAuth() here — that would redirect an unverified
+// user straight back to this exact page, an infinite loop. This page
+// needs a signed-in user WITHOUT the verified check.
+const verifyWrap = document.getElementById('verifyWrap');
+let currentUser = null;
+let pollTimer = null;
+let resendCooldownTimer = null;
+
+auth.onAuthStateChanged(user=>{
+  if(!user){
+    window.location.href = "index.html";
+    return;
+  }
+  currentUser = user;
+  render();
+  startPolling();
+});
+
+function render(){
+  verifyWrap.innerHTML = `
+    <div class="verify-glyph">📩</div>
+    <h1>Check your email</h1>
+    <p>We sent a verification link to <span class="verify-email-addr">${escapeHtml(currentUser.email)}</span>. Click the link, then come back here — this page updates on its own once it's verified.</p>
+    <button type="button" class="btn btn-primary" id="resendBtn">Resend Email</button>
+    <button type="button" class="ghost-link" id="signOutLink">Wrong email? Log out and try again</button>
+  `;
+  document.getElementById('resendBtn').addEventListener('click', resendEmail);
+  document.getElementById('signOutLink').addEventListener('click', async ()=>{
+    await auth.signOut();
+    window.location.href = "index.html";
+  });
+}
+
+async function resendEmail(){
+  const btn = document.getElementById('resendBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Sending…';
+  try{
+    await currentUser.sendEmailVerification();
+    btn.textContent = 'Sent!';
+  } catch(err){
+    // Firebase itself rate-limits repeated sends — surface that plainly
+    // rather than a generic failure, since it's the most likely cause.
+    btn.textContent = err.code === 'auth/too-many-requests'
+      ? "Too many requests — wait a bit"
+      : "Couldn't send — try again";
+  }
+  let secondsLeft = 30;
+  clearInterval(resendCooldownTimer);
+  resendCooldownTimer = setInterval(()=>{
+    secondsLeft--;
+    if(secondsLeft <= 0){
+      clearInterval(resendCooldownTimer);
+      btn.disabled = false;
+      btn.textContent = 'Resend Email';
+    } else {
+      btn.textContent = `Resend in ${secondsLeft}s`;
+    }
+  }, 1000);
+}
+
+// Polls every few seconds AND checks immediately whenever the tab regains
+// focus — covers the common case of verifying in a new tab, then
+// switching straight back here instead of waiting for the next poll tick.
+function startPolling(){
+  pollTimer = setInterval(checkVerified, 4000);
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible') checkVerified();
+  });
+}
+
+async function checkVerified(){
+  if(!currentUser) return;
+  try{
+    await currentUser.reload();
+  } catch(err){ return; }
+  if(currentUser.emailVerified){
+    clearInterval(pollTimer);
+    window.location.href = "home.html";
+  }
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+<script src="../shared/ios-install-banner.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => {
+      console.error('Service worker registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>

@@ -63,6 +63,11 @@ const signInBtn = document.getElementById('signInBtn');
 
 auth.onAuthStateChanged(async user=>{
   if(user){
+    await user.reload().catch(()=>{});
+    if(!user.emailVerified){
+      window.location.href = "verify-email.html";
+      return;
+    }
     const doc = await db.collection('users').doc(user.uid).get();
     if(doc.exists && doc.data().role === 'rider'){
       window.location.href = doc.data().verificationStatus === 'approved' ? "orders.html" : "pending-review.html";
@@ -88,6 +93,10 @@ form.addEventListener('submit', async (e)=>{
       await auth.signOut();
       signInBtn.disabled = false;
       signInBtn.textContent = "Sign In";
+      return;
+    }
+    if(!cred.user.emailVerified){
+      window.location.href = "verify-email.html";
       return;
     }
     window.location.href = doc.data().verificationStatus === 'approved' ? "orders.html" : "pending-review.html";

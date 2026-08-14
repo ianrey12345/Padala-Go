@@ -8,6 +8,7 @@ const CACHE_NAME = "padala-customer-v1";
 const APP_SHELL = [
   "/customer/index.html",
   "/customer/signup.html",
+  "/customer/verify-email.html",
   "/customer/forgot-password.html",
   "/customer/home.html",
   "/customer/order.html",
