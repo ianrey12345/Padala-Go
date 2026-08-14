@@ -15,6 +15,7 @@ const APP_SHELL = [
   "/customer/my-orders.html",
   "/customer/chat.html",
   "/customer/chat-thread.html",
+  "/customer/support.html",
   "/customer/manifest.json",
   "/customer/icons/icon-192.png",
   "/customer/icons/icon-512.png",

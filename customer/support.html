@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Padala Go">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0C4A45">
+<title>Support · Padala Go</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  html, body{ height:100%; }
+  body{ background:var(--paper); }
+  .chat-shell{ display:flex; flex-direction:column; height:100vh; max-width:480px; margin:0 auto; }
+  .chat-topbar{ background:var(--teal); color:#fff; padding:calc(14px + env(safe-area-inset-top)) 16px 14px; display:flex; align-items:center; gap:10px; flex-shrink:0; }
+  .chat-topbar .who{ font-family:'Sora'; font-weight:700; font-size:16px; }
+  .chat-topbar .sub{ font-size:11.5px; opacity:0.8; }
+  .messages{ flex:1; overflow-y:auto; padding:16px; padding-bottom:90px; display:flex; flex-direction:column; gap:8px; }
+  .bubble{ max-width:75%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.4; word-wrap:break-word; }
+  .bubble.mine{ align-self:flex-end; background:var(--teal); color:#fff; border-bottom-right-radius:4px; }
+  .bubble.theirs{ align-self:flex-start; background:var(--cream); color:var(--ink); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .bubble .sender{ font-size:11px; font-weight:700; margin-bottom:2px; opacity:0.75; }
+  .bubble .meta{ font-size:10.5px; opacity:0.65; margin-top:4px; }
+  .composer{
+    position:fixed; bottom:0; left:0; right:0; max-width:480px; margin:0 auto;
+    display:flex; gap:8px; padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line); background:#fff;
+  }
+  .composer input{ flex:1; padding:11px 14px; border-radius:20px; border:1.5px solid var(--line); font-size:16px; font-family:'Inter'; }
+  .composer input:focus{ outline:none; border-color:var(--teal); }
+  .composer button{ width:42px; height:42px; border-radius:50%; background:var(--teal); color:#fff; border:none; font-size:18px; cursor:pointer; flex-shrink:0; }
+  .composer button:disabled{ opacity:0.5; }
+</style>
+</head>
+<body>
+<div class="chat-shell">
+  <div class="chat-topbar">
+    <div>
+      <div class="who">🎧 Support</div>
+      <div class="sub">Message the Padala Go team about any concern</div>
+    </div>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="empty-state">Loading…</div>
+  </div>
+
+  <form class="composer" id="composerForm">
+    <input type="text" id="messageInput" placeholder="Type your message…" autocomplete="off" required>
+    <button type="submit" id="sendBtn">➤</button>
+  </form>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let currentUser = null;
+let myName = 'Customer';
+
+requireAuth(async user=>{
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  myName = (doc.exists && doc.data().name) ? doc.data().name : 'Customer';
+
+  const threadRef = db.collection('supportChats').doc(user.uid);
+  const threadDoc = await threadRef.get();
+  if(!threadDoc.exists){
+    await threadRef.set({
+      userName: myName,
+      userRole: 'customer',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      lastMessageAt: firebase.firestore.FieldValue.serverTimestamp(),
+      lastMessageText: '',
+      unreadForAdmin: false,
+      unreadForUser: false
+    });
+  }
+  // Clear the "unread for me" flag just by opening this page.
+  threadRef.update({ unreadForUser: false }).catch(()=>{});
+
+  listenToMessages();
+});
+
+function listenToMessages(){
+  db.collection('supportChats').doc(currentUser.uid).collection('messages')
+    .orderBy('createdAt','asc')
+    .onSnapshot(snap=>{
+      const container = document.getElementById('messages');
+      if(snap.empty){
+        container.innerHTML = `<div class="empty-state"><div class="glyph">🎧</div>Have a question or an issue? Send us a message and we'll get back to you.</div>`;
+        return;
+      }
+      container.innerHTML = '';
+      snap.forEach(doc=>{
+        const m = doc.data();
+        const mine = m.senderRole === 'customer';
+        const bubble = document.createElement('div');
+        bubble.className = `bubble ${mine ? 'mine' : 'theirs'}`;
+        bubble.innerHTML = `
+          ${!mine ? `<div class="sender">Padala Go Team</div>` : ''}
+          ${escapeHtml(m.text)}
+          <div class="meta">${m.createdAt ? timeAgo(m.createdAt) : 'sending…'}</div>
+        `;
+        container.appendChild(bubble);
+      });
+      container.scrollTop = container.scrollHeight;
+      // Own messages arriving live also count as "read" — no separate flag flip needed there.
+      db.collection('supportChats').doc(currentUser.uid).update({ unreadForUser: false }).catch(()=>{});
+    }, err=>{
+      document.getElementById('messages').innerHTML = `<div class="empty-state">Couldn't load messages.</div>`;
+    });
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+document.getElementById('composerForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const input = document.getElementById('messageInput');
+  const text = input.value.trim();
+  if(!text || !currentUser) return;
+  const sendBtn = document.getElementById('sendBtn');
+  sendBtn.disabled = true;
+  input.value = '';
+  try{
+    const threadRef = db.collection('supportChats').doc(currentUser.uid);
+    await threadRef.collection('messages').add({
+      senderId: currentUser.uid,
+      senderRole: 'customer',
+      senderName: myName,
+      text,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await threadRef.update({
+      lastMessageAt: firebase.firestore.FieldValue.serverTimestamp(),
+      lastMessageText: text,
+      lastMessageSenderRole: 'customer',
+      unreadForAdmin: true
+    });
+  } catch(err){
+    input.value = text; // restore the draft so nothing gets lost on failure
+  }
+  sendBtn.disabled = false;
+  input.focus();
+});
+</script>
+<script src="../shared/ios-install-banner.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => {
+      console.error('Service worker registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>

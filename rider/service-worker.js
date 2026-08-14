@@ -17,6 +17,7 @@ const APP_SHELL = [
   "/rider/active-delivery.html",
   "/rider/chat.html",
   "/rider/chat-thread.html",
+  "/rider/support.html",
   "/rider/refill.html",
   "/rider/statistics.html",
   "/rider/wallet.html",

@@ -83,6 +83,7 @@ function render(rider){
           ${escapeHtml(rider.rejectionReason)}
         </div>
       ` : ''}
+      <a href="support.html" class="btn btn-outline" style="text-decoration:none; margin-bottom:8px;">🎧 Contact Support</a>
       <button type="button" class="btn btn-outline" id="signOutBtn">Log Out</button>
     `;
     document.getElementById('signOutBtn').addEventListener('click', doSignOut);
@@ -94,7 +95,8 @@ function render(rider){
     <div class="status-glyph">🔍</div>
     <h1>Reviewing your application</h1>
     <p>We're checking your profile photo and driver's license. This usually doesn't take long — this page will update automatically once it's decided.</p>
-    <button type="button" class="btn btn-outline" id="signOutBtn">Log Out</button>
+    <a href="support.html" class="btn btn-outline" style="text-decoration:none; margin-bottom:8px;">🎧 Contact Support</a>
+      <button type="button" class="btn btn-outline" id="signOutBtn">Log Out</button>
   `;
   document.getElementById('signOutBtn').addEventListener('click', doSignOut);
 }

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support · Padala Go Admin</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .topbar-links{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
+  .logout-link{ color:#fff; opacity:0.85; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
+
+  .filter-tabs{
+    display:flex; gap:6px; margin-bottom:16px; background:var(--paper); border-radius:14px;
+    padding:5px; box-shadow:var(--shadow);
+  }
+  .filter-tab{
+    flex:1; text-align:center; padding:9px 4px; border-radius:10px; font-size:12.5px; font-weight:700;
+    color:#8A8178; cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .filter-tab.active{ background:var(--teal); color:#fff; }
+  .filter-tab .count{
+    font-family:'Space Mono'; font-size:11px; background:rgba(0,0,0,0.08); padding:1px 6px; border-radius:10px;
+  }
+  .filter-tab.active .count{ background:rgba(255,255,255,0.25); }
+
+  .thread-row{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    background:var(--paper); border-radius:14px; padding:14px 16px; margin-bottom:10px;
+    box-shadow:var(--shadow); border:1.5px solid var(--line); text-decoration:none; color:inherit;
+  }
+  .thread-row.unread{ border-color:var(--amber); }
+  .thread-main{ min-width:0; }
+  .thread-name{ font-size:14.5px; font-weight:700; color:var(--teal-dark); display:flex; align-items:center; gap:6px; }
+  .thread-role{
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+    background:var(--cream); color:var(--teal); padding:2px 7px; border-radius:8px;
+  }
+  .thread-preview{
+    font-size:13px; color:#8A8178; margin-top:3px; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .thread-when{ font-size:11px; color:#8A8178; flex-shrink:0; }
+  .unread-dot{ width:9px; height:9px; border-radius:50%; background:var(--amber); flex-shrink:0; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Admin</div>
+        <h1>Support</h1>
+        <div class="sub">Messages from customers and riders</div>
+      </div>
+      <div class="topbar-links">
+        <a href="riders.html" class="logout-link">🏍️ Riders</a>
+        <a href="requests.html" class="logout-link">🧾 Refill Requests</a>
+        <a href="order-history.html" class="logout-link">📦 Order History</a>
+        <a href="#" id="logoutLink" class="logout-link">🚪 Log Out</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="filter-tabs" id="filterTabs">
+      <div class="filter-tab active" data-filter="all">All <span class="count" id="count-all">0</span></div>
+      <div class="filter-tab" data-filter="unread">Unread <span class="count" id="count-unread">0</span></div>
+      <div class="filter-tab" data-filter="customer">Customers <span class="count" id="count-customer">0</span></div>
+      <div class="filter-tab" data-filter="rider">Riders <span class="count" id="count-rider">0</span></div>
+    </div>
+
+    <div id="threadsList">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let allThreads = []; // [{ id, t }]
+let activeFilter = 'all';
+
+requireAdminAuth(()=>{
+  listenToThreads();
+});
+
+function listenToThreads(){
+  db.collection('supportChats')
+    .orderBy('lastMessageAt','desc')
+    .onSnapshot(snap=>{
+      allThreads = snap.docs.map(doc=> ({ id: doc.id, t: doc.data() }));
+      updateCounts();
+      renderList();
+    }, err=>{
+      document.getElementById('threadsList').innerHTML =
+        `<div class="empty-state">Couldn't load support threads. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
+
+function matchesFilter(t, filter){
+  if(filter === 'all') return true;
+  if(filter === 'unread') return !!t.unreadForAdmin;
+  return t.userRole === filter;
+}
+
+function updateCounts(){
+  const counts = { all: allThreads.length, unread: 0, customer: 0, rider: 0 };
+  allThreads.forEach(({ t })=>{
+    if(t.unreadForAdmin) counts.unread++;
+    if(t.userRole === 'customer') counts.customer++;
+    if(t.userRole === 'rider') counts.rider++;
+  });
+  document.getElementById('count-all').textContent = counts.all;
+  document.getElementById('count-unread').textContent = counts.unread;
+  document.getElementById('count-customer').textContent = counts.customer;
+  document.getElementById('count-rider').textContent = counts.rider;
+}
+
+function renderList(){
+  const list = document.getElementById('threadsList');
+  const filtered = allThreads.filter(({ t })=> matchesFilter(t, activeFilter));
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-state"><div class="glyph">🎧</div>No messages here yet.</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  filtered.forEach(({ id, t })=>{
+    const a = document.createElement('a');
+    a.href = `support-thread.html?id=${id}`;
+    a.className = `thread-row${t.unreadForAdmin ? ' unread' : ''}`;
+    a.innerHTML = `
+      <div class="thread-main">
+        <div class="thread-name">
+          ${t.unreadForAdmin ? `<span class="unread-dot"></span>` : ''}
+          ${escapeHtml(t.userName || 'User')}
+          <span class="thread-role">${t.userRole || ''}</span>
+        </div>
+        <div class="thread-preview">${escapeHtml(t.lastMessageText || 'No messages yet')}</div>
+      </div>
+      <div class="thread-when">${t.lastMessageAt ? timeAgo(t.lastMessageAt) : ''}</div>
+    `;
+    list.appendChild(a);
+  });
+}
+
+document.getElementById('filterTabs').querySelectorAll('.filter-tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    if(tab.dataset.filter === activeFilter) return;
+    activeFilter = tab.dataset.filter;
+    document.getElementById('filterTabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    renderList();
+  });
+});
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>
