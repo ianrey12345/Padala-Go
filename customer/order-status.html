@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -450,17 +450,46 @@ function listenToOrder(){
   });
 }
 
+const ADD_AMOUNT_ACTIVE_STATUSES = ['pending', 'confirmed', 'in_progress'];
+
 function renderOrder(o){
   document.getElementById('orderCard').innerHTML = `
     <div class="top-row">
       <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-      <span class="fare-tag">${fmtPeso(o.fare)}</span>
+      <span class="fare-tag">${fmtPeso(totalFare(o))}${addedBadgeHtml(o)}</span>
     </div>
     <div class="route">📍 ${o.pickup.address}</div>
     <div class="route">🎯 ${o.dropoff.address}</div>
     ${o.notes ? `<div class="notes">"${o.notes}"</div>` : ''}
     <span class="status-badge status-${o.status}">${o.status.replace('_',' ')}</span>
+    ${ADD_AMOUNT_ACTIVE_STATUSES.includes(o.status) ? `
+      <div class="add-amount-row" style="margin-top:14px;">
+        <div class="add-amount-btn" data-add="10">+₱10</div>
+        <div class="add-amount-btn" data-add="20">+₱20</div>
+        <div class="add-amount-btn" data-add="50">+₱50</div>
+      </div>
+      <div class="add-amount-note" style="justify-content:flex-start;">
+        <span>Add extra for your rider — it's added instantly, even mid-delivery.</span>
+      </div>
+    ` : ''}
   `;
+
+  if(ADD_AMOUNT_ACTIVE_STATUSES.includes(o.status)){
+    document.getElementById('orderCard').querySelectorAll('.add-amount-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const amount = parseInt(btn.dataset.add, 10);
+        btn.style.opacity = '0.5';
+        try{
+          await db.collection('orders').doc(orderId).update({
+            addedAmount: firebase.firestore.FieldValue.increment(amount)
+          });
+        } catch(err){
+          alert("Couldn't add that right now. Please try again.");
+        }
+        btn.style.opacity = '1';
+      });
+    });
+  }
 }
 
 // When two riders' requests are within this many km of each other's

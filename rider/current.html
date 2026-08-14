@@ -357,7 +357,7 @@ function listenToActiveDelivery(){
           <div class="order-card">
             <div class="top-row">
               <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-              <span class="fare-tag">${fmtPeso(o.fare)}</span>
+              <span class="fare-tag">${fmtPeso(totalFare(o))}${addedBadgeHtml(o)}</span>
             </div>
             <div class="client-row">🙋 Client: <b id="activeClientName">${activeCustomerOrderIdFetched === doc.id && activeCustomerName ? activeCustomerName : 'Loading…'}</b></div>
             <div class="route">📍 <b>${pointTitle(o.pickup)}</b><div class="route-full">${o.pickup.address}</div></div>
@@ -540,7 +540,7 @@ function renderPastOrders(){
     card.innerHTML = `
       <div class="top-row">
         <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-        <span class="fare-tag">${fmtPeso(o.fare)}</span>
+        <span class="fare-tag">${fmtPeso(totalFare(o))}${addedBadgeHtml(o)}</span>
       </div>
       <div class="route">📍 ${o.pickup.address}</div>
       <div class="route">🎯 ${o.dropoff.address}</div>

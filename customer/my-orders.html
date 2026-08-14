@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -105,7 +105,7 @@ requireAuth(user=>{
         card.innerHTML = `
           <div class="top-row">
             <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-            <span class="fare-tag">${fmtPeso(o.fare)}</span>
+            <span class="fare-tag">${fmtPeso(totalFare(o))}${addedBadgeHtml(o)}</span>
           </div>
           <div class="route">📍 ${o.pickup.address}</div>
           <div class="route">🎯 ${o.dropoff.address}</div>

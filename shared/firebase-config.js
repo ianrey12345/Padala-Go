@@ -136,6 +136,23 @@ function fmtPeso(n){
   return "\u20B1" + n.toLocaleString('en-PH');
 }
 
+// Total the customer actually pays / rider actually collects in cash —
+// base fare plus whatever the customer added on top (see addedAmount,
+// which the rider keeps 100% of; commission is calculated on o.fare
+// alone, never on the added portion — see statistics.html).
+function totalFare(o){
+  return (o.fare || 0) + (o.addedAmount || 0);
+}
+
+// Small "↑ +₱10" pill shown next to a fare-tag whenever the customer has
+// added extra on top of the base fare. Returns '' (nothing rendered)
+// when there's no added amount, so it's safe to splice into any card
+// template unconditionally.
+function addedBadgeHtml(o){
+  if(!o.addedAmount) return '';
+  return `<span class="added-badge">\u2191 +${fmtPeso(o.addedAmount)}</span>`;
+}
+
 /* ---------------------------------------------------------
    Rider wallet — a separate platform balance from the cash
    fare the rider collects in person. The rider tops this up

@@ -314,6 +314,32 @@ h1,h2,h3{
 }
 .amount-chip.active{ background:var(--teal); border-color:var(--teal); color:#fff; }
 
+/* Added-amount badge — small "↑ +₱10" pill next to a fare-tag */
+.added-badge{
+  display:inline-flex; align-items:center; gap:2px; background:#FDF1DC; color:#B67A16;
+  font-family:'Space Mono'; font-weight:700; font-size:11.5px; padding:2px 8px; border-radius:10px;
+  margin-left:6px; vertical-align:middle;
+}
+
+/* Add-amount preset buttons (order.html + order-status.html) — unlike
+   .amount-chip these are additive, not mutually-exclusive: each tap adds
+   more rather than replacing a single selection, so none of them show
+   an "active" state. */
+.add-amount-row{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.add-amount-btn{
+  padding:10px 0; flex:1 1 calc(33.33% - 6px); min-width:64px; text-align:center; border-radius:12px;
+  border:1.5px dashed var(--amber); background:#FFFBF2; font-weight:700; font-family:'Space Mono';
+  font-size:13.5px; color:#B67A16; cursor:pointer;
+}
+.add-amount-btn:active{ background:#FDF1DC; }
+.add-amount-note{
+  display:flex; justify-content:space-between; align-items:center; margin-top:8px;
+  font-size:12px; color:#8A8178;
+}
+.add-amount-note .remove-added{
+  color:var(--red); font-weight:600; cursor:pointer; text-decoration:underline;
+}
+
 /* Transaction list rows */
 .txn-row{
   display:flex; justify-content:space-between; align-items:center; padding:12px 0;

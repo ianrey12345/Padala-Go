@@ -182,7 +182,7 @@ function renderList(){
     card.innerHTML = `
       <div class="top-row">
         <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-        <span class="fare-tag">${fmtPeso(o.fare)}</span>
+        <span class="fare-tag">${fmtPeso(totalFare(o))}${addedBadgeHtml(o)}</span>
       </div>
       <div class="route">📍 ${o.pickup.address}</div>
       <div class="route">🎯 ${o.dropoff.address}</div>

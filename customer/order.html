@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -97,6 +97,15 @@
         <span class="fare-total"><span class="peso">₱</span><span id="fareReadout">0</span></span>
       </div>
       <div class="breakdown" id="fareBreakdown">Set both points to calculate fare</div>
+      <div class="add-amount-row">
+        <div class="add-amount-btn" data-add="10">+₱10</div>
+        <div class="add-amount-btn" data-add="20">+₱20</div>
+        <div class="add-amount-btn" data-add="50">+₱50</div>
+      </div>
+      <div class="add-amount-note" id="addAmountNote" style="display:none;">
+        <span>Added <span id="addedAmountReadout">₱0</span> extra for your rider</span>
+        <span class="remove-added" id="removeAddedBtn">Remove</span>
+      </div>
     </div>
 
     <button type="button" class="btn btn-amber" id="placeOrderBtn" style="margin-top:20px;" disabled>
@@ -415,17 +424,41 @@ function selectSearchResult(r){
   }
 }
 
+let addedAmount = 0;
+
 function recalcFare(){
   if(pickupPoint && dropoffPoint){
     const km = distanceKmBetween(pickupPoint, dropoffPoint);
     const fare = computeFare(km);
     document.getElementById('distanceReadout').textContent = km.toFixed(2) + ' km';
-    document.getElementById('fareReadout').textContent = fare.toLocaleString('en-PH');
+    document.getElementById('fareReadout').textContent = (fare + addedAmount).toLocaleString('en-PH');
     document.getElementById('fareBreakdown').textContent =
       `₱${BASE_FARE} first km + ₱${PER_KM_RATE}/km × ${Math.max(0, km-1).toFixed(2)} succeeding km`;
     placeOrderBtn.disabled = false;
     placeOrderBtn.dataset.fare = fare;
     placeOrderBtn.dataset.km = km.toFixed(2);
+  }
+}
+
+document.querySelectorAll('.add-amount-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    addedAmount += parseInt(btn.dataset.add, 10);
+    renderAddedAmount();
+    recalcFare();
+  });
+});
+document.getElementById('removeAddedBtn').addEventListener('click', ()=>{
+  addedAmount = 0;
+  renderAddedAmount();
+  recalcFare();
+});
+function renderAddedAmount(){
+  const note = document.getElementById('addAmountNote');
+  if(addedAmount > 0){
+    document.getElementById('addedAmountReadout').textContent = fmtPeso(addedAmount);
+    note.style.display = 'flex';
+  } else {
+    note.style.display = 'none';
   }
 }
 
@@ -443,6 +476,7 @@ placeOrderBtn.addEventListener('click', async ()=>{
       notes: document.getElementById('notes').value.trim(),
       distanceKm: parseFloat(placeOrderBtn.dataset.km),
       fare: parseInt(placeOrderBtn.dataset.fare, 10),
+      addedAmount: addedAmount,
       status: 'pending',
       riderId: null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()

@@ -359,7 +359,7 @@ async function loadOrder(){
   const o = orderData;
 
   document.getElementById('orderSubtitle').textContent = `Padala Go, ${serviceLabel(o.serviceType)}`;
-  document.getElementById('fareBig').textContent = fmtPeso(o.fare);
+  document.getElementById('fareBig').innerHTML = fmtPeso(totalFare(o)) + addedBadgeHtml(o);
 
   formatPoint(o.pickup, 'pickupTitle', 'pickupDetail');
   formatPoint(o.dropoff, 'dropoffTitle', 'dropoffDetail');

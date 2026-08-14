@@ -106,7 +106,11 @@ async function loadCompletedOrders(riderId){
         const commission = (typeof o.commissionDeducted === 'number')
           ? o.commissionDeducted
           : Math.round(o.fare * COMMISSION_RATE);
-        totalEarned += o.fare;
+        // Earned reflects the actual cash the rider collected — base fare
+        // plus any amount the customer added — while commission is always
+        // computed from the base fare alone (added amounts go 100% to the
+        // rider, no cut taken).
+        totalEarned += totalFare(o);
         totalCommission += commission;
 
         const card = document.createElement('div');
@@ -114,7 +118,7 @@ async function loadCompletedOrders(riderId){
         card.innerHTML = `
           <div class="top-row">
             <span class="service-tag">${serviceLabel(o.serviceType)}</span>
-            <span class="fare-tag">${fmtPeso(o.fare)}</span>
+            <span class="fare-tag">${fmtPeso(totalFare(o))}${addedBadgeHtml(o)}</span>
           </div>
           <div class="route">📍 ${o.pickup.address}</div>
           <div class="route">🎯 ${o.dropoff.address}</div>
