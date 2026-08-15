@@ -22,12 +22,12 @@ const db = firebase.firestore();
 
 /* ---------------------------------------------------------
    Pricing config — tune these two numbers for your rates.
-   "12 pesos per succeeding kilometer" is interpreted as:
+   "11.0 pesos per succeeding kilometer" is interpreted as:
    the first kilometer is covered by BASE_FARE, every
    kilometer after that costs PER_KM_RATE.
    --------------------------------------------------------- */
-const BASE_FARE = 18.2;      // covers the first kilometer — adjust as needed
-const PER_KM_RATE = 12;    // pesos per km after the first
+const BASE_FARE = 35.0;      // covers the first kilometer — adjust as needed
+const PER_KM_RATE = 11.0;    // pesos per km after the first
 
 function computeFare(distanceKm){
   if (distanceKm <= 1) return BASE_FARE;
