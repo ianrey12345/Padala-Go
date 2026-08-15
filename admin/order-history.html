@@ -228,8 +228,9 @@ function showDeleteModal(items){
         Permanently delete ${count === 1 ? 'this order' : `${count} orders`}?
       </div>
       <div class="note">
-        This removes ${count === 1 ? 'it' : 'them'} — plus any chat messages, delivery requests, and rider rating
-        attached — from both the customer and rider apps for good. This can't be undone.
+        This removes ${count === 1 ? 'it' : 'them'} — plus any chat messages and delivery requests
+        attached — from both the customer and rider apps for good. The rider's rating and earnings summary
+        stay intact either way. This can't be undone.
       </div>
       <div class="modal-actions">
         <button class="btn btn-outline" id="modalKeepBtn">Keep</button>
@@ -273,11 +274,9 @@ async function deleteOrderCompletely(orderId, o){
   const refs = [];
   requestsSnap.forEach(d=> refs.push(d.ref));
   messagesSnap.forEach(d=> refs.push(d.ref));
-  if(o.riderId){
-    // Deleting a doc that doesn't exist (no rating was ever left) is a
-    // harmless no-op in Firestore, so this is safe to always include.
-    refs.push(db.collection('users').doc(o.riderId).collection('ratings').doc(orderId));
-  }
+  // Deliberately NOT deleting users/{riderId}/ratings/{orderId} anymore —
+  // a rider's rating history and earnings summary (see statistics.html)
+  // now both survive an order being permanently deleted here.
   refs.push(orderRef);
 
   const CHUNK = 450;

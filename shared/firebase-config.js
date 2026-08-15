@@ -183,7 +183,7 @@ const MIN_BALANCE_TO_TAKE_ORDERS = 30; // riders can't request/accept a new deli
    completed order everywhere (rider's Current tab, customer's My Orders
    and Order Status pages) instead of only living as a live ticker that
    disappears once the delivery is done. */
-async function completeOrderWithCommission(orderId, riderId, fare, deliveryDurationSecs){
+async function completeOrderWithCommission(orderId, riderId, fare, deliveryDurationSecs, addedAmount){
   const commission = Math.round(fare * COMMISSION_RATE);
   const orderRef = db.collection('orders').doc(orderId);
   const riderRef = db.collection('users').doc(riderId);
@@ -205,10 +205,14 @@ async function completeOrderWithCommission(orderId, riderId, fare, deliveryDurat
 
     t.update(orderRef, orderUpdate);
     t.update(riderRef, { walletBalance: newBalance });
+    // fare + addedAmount together are what statistics.html now sums for
+    // "Earned" — captured here so that total survives even if an admin
+    // later deletes the order document itself (see order-history.html).
     t.set(txnRef, {
       type: 'commission',
       amount: -commission,
       fare: fare,
+      addedAmount: addedAmount || 0,
       orderId: orderId,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });

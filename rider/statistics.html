@@ -78,6 +78,7 @@ requireAuth(async (user)=>{
     window.location.href = "pending-review.html";
     return;
   }
+  loadEarningsSummary(user.uid);
   loadCompletedOrders(user.uid);
   loadWalletTransactions(user.uid);
   watchForRiderConfirmations(user.uid);
@@ -94,9 +95,6 @@ async function loadCompletedOrders(riderId){
       .orderBy('createdAt','desc')
       .get();
 
-    let totalEarned = 0;
-    let totalCommission = 0;
-
     if(snap.empty){
       list.innerHTML = `<div class="empty-state"><div class="glyph">📦</div>No completed deliveries yet.</div>`;
     } else {
@@ -106,12 +104,6 @@ async function loadCompletedOrders(riderId){
         const commission = (typeof o.commissionDeducted === 'number')
           ? o.commissionDeducted
           : Math.round(o.fare * COMMISSION_RATE);
-        // Earned reflects the actual cash the rider collected — base fare
-        // plus any amount the customer added — while commission is always
-        // computed from the base fare alone (added amounts go 100% to the
-        // rider, no cut taken).
-        totalEarned += totalFare(o);
-        totalCommission += commission;
 
         const card = document.createElement('div');
         card.className = 'order-card';
@@ -127,12 +119,38 @@ async function loadCompletedOrders(riderId){
         list.appendChild(card);
       });
     }
+  } catch(err){
+    list.innerHTML = `<div class="empty-state">Couldn't load your delivery history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+  }
+}
+
+// Earned/Commission/Profit come from the walletTransactions log, not the
+// live orders collection — this is what keeps the summary totals correct
+// even after an admin permanently deletes a past order from Order
+// History. commission entries are written once, atomically, at the same
+// moment an order completes (see completeOrderWithCommission), and are
+// never touched by that deletion.
+async function loadEarningsSummary(riderId){
+  try{
+    const snap = await db.collection('users').doc(riderId).collection('walletTransactions')
+      .where('type','==','commission')
+      .get();
+
+    let totalEarned = 0;
+    let totalCommission = 0;
+    snap.forEach(doc=>{
+      const t = doc.data();
+      totalEarned += (t.fare || 0) + (t.addedAmount || 0);
+      totalCommission += Math.abs(t.amount || 0);
+    });
 
     document.getElementById('statEarned').textContent = fmtPeso(totalEarned);
     document.getElementById('statCommission').textContent = '−' + fmtPeso(totalCommission);
     document.getElementById('statProfit').textContent = fmtPeso(totalEarned - totalCommission);
   } catch(err){
-    list.innerHTML = `<div class="empty-state">Couldn't load your delivery history. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    document.getElementById('statEarned').textContent = '—';
+    document.getElementById('statCommission').textContent = '—';
+    document.getElementById('statProfit').textContent = '—';
   }
 }
 

@@ -589,7 +589,7 @@ function renderStage(){
         const deliveryDurationSecs = o.inProgressAt
           ? Math.round((Date.now() - o.inProgressAt.toMillis()) / 1000)
           : undefined;
-        const commission = await completeOrderWithCommission(orderId, currentUser.uid, o.fare, deliveryDurationSecs);
+        const commission = await completeOrderWithCommission(orderId, currentUser.uid, o.fare, deliveryDurationSecs, o.addedAmount);
         showToast(`Delivered! ${fmtPeso(commission)} commission (10%) deducted from your wallet.`);
       } catch(err){
         alert("Couldn't complete the delivery. Please check your connection and try again.");
