@@ -42,19 +42,19 @@
   .stage-banner .txt{font-size:13.5px; font-weight:600; color:var(--teal-dark);}
   .stage-banner .sub{font-size:12px; color:#8A8178; margin-top:1px;}
 
-  .act-row{ display:flex; align-items:stretch; gap:10px; margin-top:14px; }
+  .act-row{ display:flex; flex-direction:column; align-items:stretch; gap:10px; margin-top:14px; }
   .act-row .navigate-btn{
-    flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
     padding:11px 16px; text-decoration:none;
   }
-  .act-wrap{ position:relative; flex-shrink:0; }
+  .act-wrap{ position:relative; }
   .act-btn{
-    width:auto; height:100%; padding:11px 22px; display:inline-flex; align-items:center; gap:6px;
+    width:100%; padding:11px 22px; display:inline-flex; align-items:center; justify-content:center; gap:6px;
   }
   .act-btn .caret{ font-size:11px; transition:transform .15s ease; }
   .act-btn.open .caret{ transform:rotate(180deg); }
   .act-menu{
-    position:absolute; left:0; bottom:calc(100% + 8px); min-width:200px;
+    position:absolute; left:0; right:0; bottom:calc(100% + 8px); min-width:200px;
     background:#fff; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,0.18);
     border:1px solid var(--line); overflow:hidden; z-index:20; display:none;
   }
@@ -101,8 +101,8 @@
       <h3 style="font-size:15px; margin-bottom:8px;">Your Active Delivery</h3>
       <div id="activeCard"></div>
 
-      <div style="text-align:center; margin:14px 0;">
-        <a href="map.html" id="viewMapBtn" class="btn btn-outline" style="width:auto; display:none; padding:11px 26px; text-decoration:none;">🗺️ View Map</a>
+      <div style="margin:14px 0;">
+        <a href="map.html" id="viewMapBtn" class="btn btn-outline" style="display:none; text-decoration:none;">🗺️ View Map</a>
       </div>
 
       <div class="order-card" id="etaBanner" style="display:none; margin-top:10px; background:#EAF3FF; border-color:#C7DEFF;">
