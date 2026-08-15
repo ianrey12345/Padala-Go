@@ -67,6 +67,7 @@ requireAuth(async (user)=>{
     return;
   }
   watchForRiderConfirmations(user.uid);
+  watchAutoModeMatching(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
   watchWalletBalance('bigBalance', user.uid, (bal)=>{

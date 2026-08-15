@@ -41,9 +41,61 @@
   }
   .wallet-pill.low{ background:#F0A93A; color:var(--teal-dark); }
   .wallet-pill .warn{ font-size:13px; }
+
+  .auto-mode-fab{
+    position:fixed; top:calc(14px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+    z-index:900; display:flex; align-items:center; gap:7px; padding:9px 16px; border-radius:22px;
+    font-size:13px; font-weight:700; border:none; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,0.25);
+    font-family:'Inter',sans-serif;
+  }
+  .auto-mode-fab.off{ background:#fff; color:var(--teal-dark); }
+  .auto-mode-fab.on{ background:var(--green); color:#fff; }
+  .auto-mode-fab .dot{ width:8px; height:8px; border-radius:50%; background:currentColor; opacity:0.6; }
+  .auto-mode-fab.on .dot{ background:#fff; opacity:1; animation: autoPulse 1.4s infinite; }
+  @keyframes autoPulse{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  .auto-modal-overlay{
+    position:fixed; inset:0; background:rgba(8,47,43,0.75); z-index:1000;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .auto-modal-card{
+    background:#fff; border-radius:22px 22px 0 0; padding:22px 20px calc(22px + env(safe-area-inset-bottom));
+    max-width:480px; width:100%; max-height:85vh; overflow-y:auto;
+  }
+  .auto-modal-card h2{ font-size:18px; margin-bottom:4px; }
+  .auto-modal-card .sub{ font-size:13px; color:#6C7A78; margin-bottom:18px; }
+  .auto-toggle-row{
+    display:flex; justify-content:space-between; align-items:center; background:var(--cream);
+    border-radius:14px; padding:14px 16px; margin-bottom:18px;
+  }
+  .auto-toggle-row .lbl{ font-weight:700; font-size:14.5px; color:var(--teal-dark); }
+  .switch{ position:relative; width:46px; height:26px; flex-shrink:0; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch .track{
+    position:absolute; inset:0; background:#C7BFB2; border-radius:20px; cursor:pointer; transition:background .15s;
+  }
+  .switch .track::before{
+    content:""; position:absolute; width:20px; height:20px; left:3px; top:3px; background:#fff;
+    border-radius:50%; transition:transform .15s;
+  }
+  .switch input:checked + .track{ background:var(--green); }
+  .switch input:checked + .track::before{ transform:translateX(20px); }
+  .muni-group-title{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;
+    color:#8A8178; margin:14px 0 6px;
+  }
+  .muni-row{
+    display:flex; align-items:center; gap:10px; padding:8px 2px; font-size:14px; color:var(--ink);
+  }
+  .muni-row input{ width:18px; height:18px; accent-color:var(--teal); flex-shrink:0; }
+  .auto-modal-card .field{ margin-bottom:4px; }
 </style>
 </head>
 <body>
+<button type="button" class="auto-mode-fab off" id="autoModeFab">
+  <span class="dot"></span><span id="autoModeFabLabel">Auto Mode: Off</span>
+</button>
+<div id="autoModeModalRoot"></div>
 <div class="app-shell">
   <div class="topbar">
     <div class="topbar-row">
@@ -142,7 +194,9 @@ requireAuth(async user=>{
   startRiderLiveLocation();
   watchMyActiveDelivery(user.uid);
   listenToPendingOrders();
+  watchAutoModeProfile(user.uid);
   watchForRiderConfirmations(user.uid);
+  watchAutoModeMatching(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
   watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{
@@ -425,6 +479,134 @@ document.getElementById('categoryFilters').querySelectorAll('.menu-row').forEach
     renderOrdersList();
   });
 });
+
+/* ---------------------------------------------------------
+   Auto Mode — floating toggle + settings sheet. The actual matching
+   engine (watchAutoModeMatching) runs globally in shared/firebase-config.js
+   on every rider page; this is just the UI for turning it on/off and
+   setting filters on the rider's own profile.
+   --------------------------------------------------------- */
+let myAutoModeProfile = { autoModeOn: false, autoModeMinFare: null, autoModeMunicipalities: [] };
+
+function watchAutoModeProfile(riderId){
+  db.collection('users').doc(riderId).onSnapshot(doc=>{
+    if(!doc.exists) return;
+    const d = doc.data();
+    myAutoModeProfile = {
+      autoModeOn: !!d.autoModeOn,
+      autoModeMinFare: (typeof d.autoModeMinFare === 'number') ? d.autoModeMinFare : null,
+      autoModeMunicipalities: d.autoModeMunicipalities || []
+    };
+    renderAutoModeFab();
+  });
+}
+
+function renderAutoModeFab(){
+  const fab = document.getElementById('autoModeFab');
+  const label = document.getElementById('autoModeFabLabel');
+  fab.className = 'auto-mode-fab ' + (myAutoModeProfile.autoModeOn ? 'on' : 'off');
+  label.textContent = 'Auto Mode: ' + (myAutoModeProfile.autoModeOn ? 'On' : 'Off');
+}
+
+document.getElementById('autoModeFab').addEventListener('click', openAutoModeModal);
+
+function openAutoModeModal(){
+  const allSelected = myAutoModeProfile.autoModeMunicipalities.length === 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'auto-modal-overlay';
+
+  let groupsHtml = '';
+  for(const province in PANAY_MUNICIPALITIES){
+    groupsHtml += `<div class="muni-group-title">${province}</div>`;
+    PANAY_MUNICIPALITIES[province].forEach(m=>{
+      const checked = myAutoModeProfile.autoModeMunicipalities.includes(m);
+      groupsHtml += `
+        <label class="muni-row">
+          <input type="checkbox" class="muni-check" value="${m}" ${checked ? 'checked' : ''}>
+          ${m}
+        </label>
+      `;
+    });
+  }
+
+  overlay.innerHTML = `
+    <div class="auto-modal-card">
+      <h2>⚡ Auto Mode</h2>
+      <div class="sub">Automatically get sent nearby orders that match your filters — no need to browse and request manually.</div>
+
+      <div class="auto-toggle-row">
+        <span class="lbl">Auto Mode</span>
+        <label class="switch">
+          <input type="checkbox" id="autoModeSwitch" ${myAutoModeProfile.autoModeOn ? 'checked' : ''}>
+          <span class="track"></span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="autoMinFareInput">Minimum fare (optional)</label>
+        <input type="number" id="autoMinFareInput" placeholder="e.g. 80" min="0" step="1"
+               value="${myAutoModeProfile.autoModeMinFare !== null ? myAutoModeProfile.autoModeMinFare : ''}">
+      </div>
+
+      <div class="field" style="margin-top:14px;">
+        <label>Municipalities</label>
+        <div class="hint" style="margin-bottom:6px;">Only get orders picking up from these areas — or leave "All" checked for anywhere on Panay.</div>
+        <label class="muni-row" style="font-weight:700;">
+          <input type="checkbox" id="autoAllMunisCheck" ${allSelected ? 'checked' : ''}>
+          All Municipalities
+        </label>
+        <div id="muniGroups" style="${allSelected ? 'display:none;' : ''}">
+          ${groupsHtml}
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-primary" id="autoModeSaveBtn" style="margin-top:18px;">Save</button>
+      <button type="button" class="btn btn-ghost" id="autoModeCancelBtn">Cancel</button>
+    </div>
+  `;
+  document.getElementById('autoModeModalRoot').appendChild(overlay);
+
+  const allCheck = overlay.querySelector('#autoAllMunisCheck');
+  const muniGroups = overlay.querySelector('#muniGroups');
+  allCheck.addEventListener('change', ()=>{
+    muniGroups.style.display = allCheck.checked ? 'none' : 'block';
+    if(allCheck.checked){
+      overlay.querySelectorAll('.muni-check').forEach(cb=> cb.checked = false);
+    }
+  });
+  overlay.querySelectorAll('.muni-check').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const anyChecked = Array.from(overlay.querySelectorAll('.muni-check')).some(c=> c.checked);
+      if(anyChecked) allCheck.checked = false;
+    });
+  });
+
+  overlay.addEventListener('click', (e)=>{ if(e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#autoModeCancelBtn').addEventListener('click', ()=> overlay.remove());
+  overlay.querySelector('#autoModeSaveBtn').addEventListener('click', async ()=>{
+    const btn = overlay.querySelector('#autoModeSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+
+    const autoModeOn = overlay.querySelector('#autoModeSwitch').checked;
+    const minFareVal = overlay.querySelector('#autoMinFareInput').value.trim();
+    const autoModeMinFare = minFareVal ? parseInt(minFareVal, 10) : null;
+    const selected = allCheck.checked ? [] : Array.from(overlay.querySelectorAll('.muni-check:checked')).map(cb=> cb.value);
+
+    try{
+      await db.collection('users').doc(currentUser.uid).update({
+        autoModeOn,
+        autoModeMinFare,
+        autoModeMunicipalities: selected
+      });
+      overlay.remove();
+    } catch(err){
+      btn.disabled = false;
+      btn.textContent = 'Save';
+      alert("Couldn't save your Auto Mode settings. Please try again.");
+    }
+  });
+}
 
 document.getElementById('logoutLink').addEventListener('click', async (e)=>{
   e.preventDefault();

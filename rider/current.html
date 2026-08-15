@@ -312,6 +312,7 @@ requireAuth(async user=>{
   listenToActiveDelivery();
   listenToPastOrders();
   watchForRiderConfirmations(user.uid);
+  watchAutoModeMatching(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
   watchWalletBalance('walletBalanceHeader', user.uid, (bal)=>{

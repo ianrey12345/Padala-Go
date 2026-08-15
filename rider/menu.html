@@ -90,6 +90,7 @@ requireAuth(async (user)=>{
 
   watchWalletBalance('walletBalanceRow', user.uid);
   watchForRiderConfirmations(user.uid);
+  watchAutoModeMatching(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
 });

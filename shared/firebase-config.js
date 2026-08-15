@@ -22,12 +22,12 @@ const db = firebase.firestore();
 
 /* ---------------------------------------------------------
    Pricing config — tune these two numbers for your rates.
-   "12.0 pesos per succeeding kilometer" is interpreted as:
+   "12 pesos per succeeding kilometer" is interpreted as:
    the first kilometer is covered by BASE_FARE, every
    kilometer after that costs PER_KM_RATE.
    --------------------------------------------------------- */
-const BASE_FARE = 37.5;      // covers the first kilometer — adjust as needed
-const PER_KM_RATE = 12.5;    // pesos per km after the first
+const BASE_FARE = 18.2;      // covers the first kilometer — adjust as needed
+const PER_KM_RATE = 12;    // pesos per km after the first
 
 function computeFare(distanceKm){
   if (distanceKm <= 1) return BASE_FARE;
@@ -172,7 +172,125 @@ function addedBadgeHtml(o){
    so the Statistics page can show a full breakdown.
    --------------------------------------------------------- */
 const COMMISSION_RATE = 0.12;       // 12% of the fare, deducted from wallet on completion
-const LOW_BALANCE_THRESHOLD = 50;   // header shows a low-balance warning below this
+const LOW_BALANCE_THRESHOLD = 50;   // header shows a low-balance warning below this — also the minimum wallet balance to receive Auto Mode orders
+
+/* ---------------------------------------------------------
+   Auto Mode — every municipality across Panay's four provinces,
+   grouped for the filter checklist. An empty selection on a rider's
+   profile (autoModeMunicipalities: []) means "all of them", not "none".
+   --------------------------------------------------------- */
+const PANAY_MUNICIPALITIES = {
+  "Iloilo": ["Iloilo City","Passi City","Ajuy","Alimodian","Anilao","Badiangan","Balasan","Banate","Barotac Nuevo","Barotac Viejo","Batad","Bingawan","Cabatuan","Calinog","Carles","Concepcion","Dingle","Dueñas","Dumangas","Estancia","Guimbal","Igbaras","Janiuay","Lambunao","Leganes","Lemery","Leon","Maasin","Miagao","Mina","New Lucena","Oton","Pavia","Pototan","San Dionisio","San Enrique","San Joaquin","San Miguel","San Rafael","Santa Barbara","Sara","Tigbauan","Tubungan","Zarraga"],
+  "Aklan": ["Altavas","Balete","Banga","Batan","Buruanga","Ibajay","Kalibo","Lezo","Libacao","Madalag","Makato","Malay","Malinao","Nabas","New Washington","Numancia","Tangalan"],
+  "Capiz": ["Roxas City","Cuartero","Dao","Dumalag","Dumarao","Ivisan","Jamindan","Maayon","Mambusao","Panay","Panitan","Pilar","Pontevedra","President Roxas","Sapian","Sigma","Tapaz"],
+  "Antique": ["Anini-y","Barbaza","Belison","Bugasong","Caluya","Culasi","Hamtic","Laua-an","Libertad","Pandan","Patnongon","San Jose de Buenavista","San Remigio","Sebaste","Sibalom","Tibiao","Tobias Fornier","Valderrama"]
+};
+
+// True if this order's pickup falls in one of the rider's selected
+// municipalities — or always true if they haven't restricted to any
+// (empty array = all municipalities). Checks the geocoded municipality
+// field first, falling back to a substring check against the full
+// address, since free reverse-geocoding data is occasionally missing
+// or oddly categorized for a given point.
+function orderMatchesMunicipalities(order, selectedMunicipalities){
+  if(!selectedMunicipalities || selectedMunicipalities.length === 0) return true;
+  const geoMuni = (order.pickup && order.pickup.municipality || '').toLowerCase();
+  const fullAddress = (order.pickup && order.pickup.address || '').toLowerCase();
+  return selectedMunicipalities.some(m=>{
+    const ml = m.toLowerCase();
+    return geoMuni === ml || fullAddress.includes(ml);
+  });
+}
+
+// Auto Mode's matching engine — client-side only (see the Auto Mode
+// settings UI on orders.html for the full explanation of why). Runs on
+// every rider page alongside the other background watchers below.
+// Whenever a pending, unassigned order changes, every rider currently
+// running this listener with Auto Mode on independently re-checks
+// eligibility and, if they're the nearest eligible candidate who hasn't
+// already been offered this specific order, attempts to claim it via a
+// transaction. Losing that race is a normal, expected outcome, not an
+// error — whoever's transaction actually lands first wins; everyone
+// else's claim attempt is simply rejected because the order is no
+// longer pending by the time theirs runs.
+let autoModeUnsub = null;
+function watchAutoModeMatching(riderId){
+  if(autoModeUnsub) autoModeUnsub();
+  autoModeUnsub = db.collection('orders')
+    .where('status','==','pending')
+    .where('riderId','==', null)
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type === 'added' || change.type === 'modified'){
+          tryAutoClaim(riderId, change.doc.id, change.doc.data());
+        }
+      });
+    }, ()=>{ /* ignore transient listener errors — next snapshot retries */ });
+}
+
+async function tryAutoClaim(riderId, orderId, order){
+  try{
+    const meDoc = await db.collection('users').doc(riderId).get();
+    if(!meDoc.exists) return;
+    const me = meDoc.data();
+    if(!me.autoModeOn) return;
+    if(me.verificationStatus !== 'approved') return;
+    if((me.walletBalance || 0) < LOW_BALANCE_THRESHOLD) return;
+    if((order.autoOfferedRiderIds || []).includes(riderId)) return; // already offered & declined/timed out
+    if(me.autoModeMinFare && order.fare < me.autoModeMinFare) return;
+    if(!orderMatchesMunicipalities(order, me.autoModeMunicipalities)) return;
+    if(!me.liveLocation) return; // no known position to rank distance from
+
+    // 1.3km eligibility radius from the pickup point.
+    const myDistanceKm = distanceKmBetween(me.liveLocation, order.pickup);
+    if(myDistanceKm > 1.3) return;
+
+    // Am I the nearest currently-eligible candidate? Fetch every other
+    // auto-mode rider and compare — this is the piece that fundamentally
+    // can't be enforced server-side (see the rules comment on the
+    // matching Firestore rule), so it's trusted client computation.
+    const candidatesSnap = await db.collection('users')
+      .where('role','==','rider')
+      .where('verificationStatus','==','approved')
+      .where('autoModeOn','==', true)
+      .get();
+
+    let iAmNearest = true;
+    const twoMinutesAgo = Date.now() - 120000;
+    candidatesSnap.forEach(doc=>{
+      if(doc.id === riderId) return;
+      const c = doc.data();
+      if((c.walletBalance || 0) < LOW_BALANCE_THRESHOLD) return;
+      if((order.autoOfferedRiderIds || []).includes(doc.id)) return;
+      if(c.autoModeMinFare && order.fare < c.autoModeMinFare) return;
+      if(!orderMatchesMunicipalities(order, c.autoModeMunicipalities)) return;
+      if(!c.liveLocation) return;
+      if(!c.liveLocationUpdatedAt || c.liveLocationUpdatedAt.toMillis() < twoMinutesAgo) return; // stale/offline
+      const theirDistanceKm = distanceKmBetween(c.liveLocation, order.pickup);
+      if(theirDistanceKm > 1.3) return;
+      if(theirDistanceKm < myDistanceKm) iAmNearest = false;
+    });
+    if(!iAmNearest) return;
+
+    // Claim it — same shape as a customer confirming a rider manually,
+    // so the existing accept/decline countdown (watchForRiderConfirmations
+    // + showDecisionModal) picks it up with no changes needed there.
+    const orderRef = db.collection('orders').doc(orderId);
+    await db.runTransaction(async (t)=>{
+      const fresh = await t.get(orderRef);
+      if(!fresh.exists) return;
+      const f = fresh.data();
+      if(f.status !== 'pending' || f.riderId) return; // someone else won the race, or a customer already confirmed a manual request
+      t.update(orderRef, {
+        status: 'confirmed',
+        riderId: riderId,
+        riderAccepted: null,
+        riderDecisionDeadline: firebase.firestore.Timestamp.fromMillis(Date.now() + 15000),
+        autoOfferedRiderIds: firebase.firestore.FieldValue.arrayUnion(riderId)
+      });
+    });
+  } catch(err){ /* a lost race or a transient error — next snapshot will try again */ }
+}
 const MIN_BALANCE_TO_TAKE_ORDERS = 30; // riders can't request/accept a new delivery below this
 
 /* Marks an order completed AND deducts the 12% commission from the
@@ -536,7 +654,13 @@ async function declineConfirmedOrder(orderId){
         status: 'pending',
         riderId: null,
         riderAccepted: null,
-        riderDecisionDeadline: null
+        riderDecisionDeadline: null,
+        // Recorded regardless of whether this was a manual confirm or an
+        // Auto Mode claim — harmless either way, and it's what lets Auto
+        // Mode's fallback chain skip straight to the next-nearest rider
+        // instead of re-offering this same order to someone who just
+        // turned it down.
+        autoOfferedRiderIds: firebase.firestore.FieldValue.arrayUnion(riderId)
       });
     });
   } catch(e){ /* if this fails, leave the order as-is rather than risk corrupting it */ }

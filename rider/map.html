@@ -294,6 +294,7 @@ requireAuth(async (user)=>{
   ensureMap();
   listenToActiveOrder();
   watchForRiderConfirmations(user.uid);
+  watchAutoModeMatching(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
 });

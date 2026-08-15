@@ -82,6 +82,7 @@ requireAuth(async (user)=>{
   loadCompletedOrders(user.uid);
   loadWalletTransactions(user.uid);
   watchForRiderConfirmations(user.uid);
+  watchAutoModeMatching(user.uid);
   watchForOrderCancellations(user.uid);
   watchForNewMessages(user.uid);
 });
