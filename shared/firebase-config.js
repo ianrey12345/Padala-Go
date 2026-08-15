@@ -26,7 +26,7 @@ const db = firebase.firestore();
    the first kilometer is covered by BASE_FARE, every
    kilometer after that costs PER_KM_RATE.
    --------------------------------------------------------- */
-const BASE_FARE = 36.5;      // covers the first kilometer — adjust as needed
+const BASE_FARE = 37.5;      // covers the first kilometer — adjust as needed
 const PER_KM_RATE = 12.5;    // pesos per km after the first
 
 function computeFare(distanceKm){
