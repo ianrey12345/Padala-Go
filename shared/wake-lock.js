@@ -1,42 +1,46 @@
-// Padala Go — keeps the screen from turning off / dimming (from the
-// phone's own auto-lock / sleep timer) while this app is open, using the
-// Screen Wake Lock API. Include it on any page you want to stay awake —
-// same pattern as ios-install-banner.js.
+// Padala Go — keeps the screen from dimming/locking while the app is
+// open. Wraps NoSleep.js (loaded via CDN — see the script tag you need
+// to add right before this one) instead of only the native Wake Lock
+// API, because native wakeLock is known to silently "succeed" without
+// actually holding the screen awake inside an installed/standalone iOS
+// PWA. NoSleep.js works around that with a muted looping video as a
+// fallback, which iOS Safari does respect.
 //
-// Notes:
-// - Requires a secure context (https:// or localhost), same as the rest
-//   of the app.
-// - The OS/browser automatically releases the lock whenever the tab or
-//   app is backgrounded, the screen is manually locked, etc. — so this
-//   also re-acquires it the instant the app becomes visible again,
-//   otherwise it would silently stop working after the first time
-//   someone switches away and comes back.
-// - Not supported on every browser/OS (notably older iOS Safari <16.4).
-//   Wrapped in try/catch so it silently no-ops where unavailable instead
-//   of breaking anything.
+// IMPORTANT — iOS refuses to let ANY video start playing until the user
+// has made a real tap/click on the page (its autoplay policy). That's
+// almost certainly why the previous version "worked" while you were
+// actively tapping around but the screen still dimmed once it sat idle:
+// nothing had ever actually been allowed to start. This version waits
+// for the very first tap anywhere on the page, enables the wake lock at
+// that moment, and it then stays active for the rest of the session —
+// including through idle periods with no touches.
 (function () {
-  if (!('wakeLock' in navigator)) return;
-
-  let wakeLockSentinel = null;
-
-  async function requestWakeLock() {
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-      wakeLockSentinel.addEventListener('release', () => {
-        wakeLockSentinel = null;
-      });
-    } catch (err) {
-      // Common, harmless causes: battery saver mode, permissions, or the
-      // page briefly not visible at request time. Just don't hold a lock.
-      wakeLockSentinel = null;
-    }
+  if (typeof NoSleep === 'undefined') {
+    console.warn('[wake-lock] NoSleep.js not loaded — add its <script> tag before this one.');
+    return;
   }
 
+  const noSleep = new NoSleep();
+  let enabled = false;
+
+  function enableOnce() {
+    if (enabled) return;
+    enabled = true;
+    noSleep.enable();
+    document.removeEventListener('touchstart', enableOnce, true);
+    document.removeEventListener('click', enableOnce, true);
+  }
+
+  document.addEventListener('touchstart', enableOnce, true);
+  document.addEventListener('click', enableOnce, true);
+
+  // The OS can still force-release the lock when the app is backgrounded
+  // (switched away from, screen manually locked, etc). Re-enable it the
+  // moment the app is visible again so a background/foreground cycle
+  // doesn't quietly turn this off for the rest of the session.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && wakeLockSentinel === null) {
-      requestWakeLock();
+    if (document.visibilityState === 'visible' && enabled) {
+      noSleep.enable();
     }
   });
-
-  requestWakeLock();
 })();
