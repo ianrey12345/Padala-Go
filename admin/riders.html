@@ -53,6 +53,13 @@
   .status-pending{ background:#FDF1DC; color:#B67A16; }
   .status-rejected{ background:#FCEBEB; color:var(--red); }
 
+  .phone-row{
+    display:flex; justify-content:space-between; align-items:center; background:var(--cream);
+    border-radius:10px; padding:9px 12px; margin-top:10px; font-size:13px;
+  }
+  .phone-row .lbl{ font-weight:700; color:#8A8178; }
+  .phone-row .val{ font-family:'Space Mono'; font-weight:700; color:var(--teal-dark); }
+
   .rejection-note{
     font-size:12.5px; color:var(--red); background:#FCEBEB; border-radius:10px;
     padding:8px 10px; margin-top:10px;
@@ -205,9 +212,13 @@ function renderList(){
       <div class="top-row">
         <div>
           <div class="name">${escapeHtml(r.name || 'Rider')}</div>
-          <div class="details">${escapeHtml(r.phone || '')}${r.plate ? ` · Plate ${escapeHtml(r.plate)}` : ''}${r.motorColor ? ` · ${escapeHtml(r.motorColor)}` : ''}</div>
+          <div class="details">${r.plate ? `Plate ${escapeHtml(r.plate)}` : ''}${r.motorColor ? ` · ${escapeHtml(r.motorColor)}` : ''}</div>
         </div>
         <span class="status-badge status-${status}">${status}</span>
+      </div>
+      <div class="phone-row">
+        <span class="lbl">📱 Mobile Number</span>
+        <span class="val">${escapeHtml(r.phone || '—')}</span>
       </div>
       <div class="doc-row">
         ${docThumb(r.profilePhotoUrl, 'Profile', 'profile')}
