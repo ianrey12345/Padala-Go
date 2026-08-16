@@ -1,49 +1,49 @@
-// Padala Go — keeps the screen from dimming/locking while the app is
-// open, using NoSleep.js (loaded via CDN — add its <script> tag right
-// before this one).
-//
-// WHY THIS FORCES THE VIDEO METHOD:
-// NoSleep.js always prefers the native Screen Wake Lock API whenever the
-// browser reports support for it (navigator.wakeLock — true on iOS
-// 16.4+). That native API has confirmed, still-open WebKit bugs where it
-// reports success without actually holding the screen awake — notably
-// inside installed/standalone home-screen apps (WebKit bug 254545), but
-// also intermittently in plain Safari tabs on various iOS versions.
-// NoSleep's OTHER method — a muted, invisible, looping video — is the
-// one that actually works around this, but NoSleep only falls back to it
-// when navigator.wakeLock looks unsupported. So below, we hide
-// navigator.wakeLock from NoSleep's own detection before constructing
-// it, forcing it down the reliable video path everywhere instead of
-// gambling on the buggy native one.
-//
-// IMPORTANT — iOS refuses to let ANY video start playing until the user
-// has made a real tap/click on the page (its autoplay policy). This
-// waits for the very first tap anywhere on the page, enables the wake
-// lock at that moment, and it then stays active for the rest of the
-// session — including through idle periods with no touches.
+// Padala Go — TEMPORARY DEBUG VERSION of the screen wake-lock script.
+// This version reports its own live status in an on-screen banner so we
+// can see exactly what's happening instead of guessing. Once confirmed
+// working, swap back to the plain (non-debug) version.
 (function () {
+  function showBanner(text, color) {
+    var el = document.getElementById('wakeLockDebugBanner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'wakeLockDebugBanner';
+      el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;color:#fff;font-size:11px;padding:8px;z-index:99999;text-align:center;font-family:sans-serif;white-space:pre-wrap;';
+      document.body.appendChild(el);
+    }
+    el.style.background = color || '#D64545';
+    el.textContent = text;
+  }
+
   if (typeof NoSleep === 'undefined') {
-    console.warn('[wake-lock] NoSleep.js not loaded — add its <script> tag before this one.');
+    showBanner('❌ NoSleep NOT loaded', '#D64545');
     return;
   }
 
+  var overrideWorked = false;
   try {
     Object.defineProperty(navigator, 'wakeLock', {
       get: function () { return undefined; },
       configurable: true
     });
+    overrideWorked = (typeof navigator.wakeLock === 'undefined');
   } catch (e) {
-    // If this can't be redefined in some browser, NoSleep just falls
-    // back to whichever method it would have picked on its own.
+    overrideWorked = false;
   }
 
-  const noSleep = new NoSleep();
-  let enabled = false;
+  var noSleep = new NoSleep();
+  var enabled = false;
+
+  showBanner('✅ NoSleep loaded | native-API override: ' + (overrideWorked ? 'OK' : 'FAILED') + ' | tap screen to arm', '#B67A16');
 
   function enableOnce() {
     if (enabled) return;
     enabled = true;
-    noSleep.enable();
+    noSleep.enable().then(function () {
+      showBanner('✅ Wake lock ENABLED (video playing) — leave phone untouched now', '#2F8F5B');
+    }).catch(function (err) {
+      showBanner('❌ enable() FAILED: ' + (err && err.message ? err.message : err), '#D64545');
+    });
     document.removeEventListener('touchstart', enableOnce, true);
     document.removeEventListener('click', enableOnce, true);
   }
@@ -53,7 +53,7 @@
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && enabled) {
-      noSleep.enable();
+      noSleep.enable().catch(function () {});
     }
   });
 })();
