@@ -241,6 +241,19 @@ async function tryAutoClaim(riderId, orderId, order){
     if(!orderMatchesMunicipalities(order, me.autoModeMunicipalities)) return;
     if(!me.liveLocation) return; // no known position to rank distance from
 
+    // One order at a time — skip claiming anything new if this rider
+    // already has an order confirmed (including one still awaiting their
+    // own accept/decline decision) or in progress. Without this check,
+    // two matching orders arriving close together could both land on the
+    // same rider simultaneously, since each order's claim transaction
+    // only validates that specific order in isolation.
+    const activeSnap = await db.collection('orders')
+      .where('riderId','==', riderId)
+      .where('status','in', ['confirmed','in_progress'])
+      .limit(1)
+      .get();
+    if(!activeSnap.empty) return;
+
     // 1.3km eligibility radius from the pickup point.
     const myDistanceKm = distanceKmBetween(me.liveLocation, order.pickup);
     if(myDistanceKm > 1.3) return;

@@ -175,6 +175,37 @@ let trackPickupMarker = null;
 let trackDropoffMarker = null;
 let trackMapReady = false;
 
+/* ---------------------------------------------------------
+   Customer's own live location — broadcast the same way the rider
+   broadcasts theirs (see broadcastRiderLocation in rider/map.html),
+   so the rider can see the customer's position on their map too. Starts
+   once the order is confirmed, stops the moment it's no longer active.
+   --------------------------------------------------------- */
+let customerLocationWatchId = null;
+let lastCustomerLocationWriteAt = 0;
+
+function startCustomerLocationBroadcast(){
+  if(customerLocationWatchId !== null) return; // already watching
+  if(!navigator.geolocation) return;
+  customerLocationWatchId = navigator.geolocation.watchPosition(pos=>{
+    const now = Date.now();
+    if(now - lastCustomerLocationWriteAt < 4000) return;
+    lastCustomerLocationWriteAt = now;
+    if(!orderId) return;
+    db.collection('orders').doc(orderId).update({
+      customerLocation: { lat: pos.coords.latitude, lng: pos.coords.longitude },
+      customerLocationUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(()=>{ /* ignore transient failures — next fix will retry */ });
+  }, ()=>{ /* silently ignore — sharing location isn't required to track the delivery */ }, { enableHighAccuracy: true });
+}
+
+function stopCustomerLocationBroadcast(){
+  if(customerLocationWatchId !== null){
+    navigator.geolocation.clearWatch(customerLocationWatchId);
+    customerLocationWatchId = null;
+  }
+}
+
 const trackRiderIcon = L.divIcon({
   className: '',
   html: '<div style="width:16px;height:16px;border-radius:50%;background:#F0A93A;border:2px solid #082F2B;box-shadow:0 0 0 2px #fff;"></div>',
@@ -211,11 +242,13 @@ function updateTrackingMap(o){
   // Only show live tracking while there's an assigned rider actively en route.
   if(!o.riderId || o.status === 'completed' || o.status === 'cancelled'){
     mapCard.style.display = 'none';
+    stopCustomerLocationBroadcast();
     return;
   }
 
   mapCard.style.display = 'block';
   ensureTrackMap(o);
+  startCustomerLocationBroadcast();
 
   const boundsPoints = [
     [o.pickup.lat, o.pickup.lng],

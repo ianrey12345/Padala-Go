@@ -120,7 +120,7 @@ let currentUser = null;
 let orderId = null;
 let orderRef = null;
 let orderData = null;
-let map, riderMarker, pickupMarker, dropoffMarker, routeLine, progressLine, watchId;
+let map, riderMarker, pickupMarker, dropoffMarker, customerMarker, routeLine, progressLine, watchId;
 let hasCenteredOnUser = false;
 let boundsFitForOrderId = null; // only auto-frame the route once per order, not on every GPS tick
 
@@ -313,6 +313,11 @@ const dropoffIcon = L.divIcon({
   className: '',
   html: '<div style="font-size:20px;line-height:1;">🏁</div>',
   iconSize: [20,20], iconAnchor: [10,20]
+});
+const customerIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:22px;line-height:1;">👤</div>',
+  iconSize: [22,22], iconAnchor: [11,20]
 });
 
 function ensureMap(){
@@ -526,12 +531,31 @@ function listenToActiveOrder(){
       orderData = doc.data();
       showActiveState();
       renderStage();
+      updateCustomerMarker();
       if(map && riderMarker){
         updateRouteVisuals(riderMarker.getLatLng());
       }
     }, err=>{
       console.warn('Could not load active delivery:', err);
     });
+}
+
+// Shows the customer's live location (👤) once they've started sharing
+// it — from the moment the order is confirmed through to completion,
+// same window the customer's own app broadcasts in (see
+// startCustomerLocationBroadcast in customer/order-status.html).
+function updateCustomerMarker(){
+  if(!map) return;
+  if(!orderData || !orderData.customerLocation){
+    if(customerMarker){ map.removeLayer(customerMarker); customerMarker = null; }
+    return;
+  }
+  const pos = [orderData.customerLocation.lat, orderData.customerLocation.lng];
+  if(!customerMarker){
+    customerMarker = L.marker(pos, { icon: customerIcon, title: 'Customer', zIndexOffset: 900 }).addTo(map);
+  } else {
+    customerMarker.setLatLng(pos);
+  }
 }
 
 function showEmptyState(){
@@ -541,6 +565,7 @@ function showEmptyState(){
   stopElapsedTimer();
   orderId = null; orderRef = null; orderData = null;
   boundsFitForOrderId = null;
+  if(customerMarker && map){ map.removeLayer(customerMarker); customerMarker = null; }
 }
 
 function showActiveState(){
