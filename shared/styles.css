@@ -249,7 +249,7 @@ h1,h2,h3{
   display:flex; align-items:stretch;
   padding:8px 0 env(safe-area-inset-bottom);
   max-width:480px; margin:0 auto;
-  z-index:100;
+  z-index:1000;
 }
 .tabbar a{
   flex:1; text-align:center; text-decoration:none; color:#9B9186;
