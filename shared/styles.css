@@ -245,15 +245,16 @@ h1,h2,h3{
 .tabbar{
   position:sticky; bottom:0; left:0; right:0;
   background:var(--paper); border-top:1px solid var(--line);
-  display:flex; padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+  display:flex; padding:6px 4px calc(6px + env(safe-area-inset-bottom));
   max-width:480px; margin:0 auto;
 }
 .tabbar a{
   flex:1; text-align:center; text-decoration:none; color:#9B9186;
-  font-size:11.5px; font-weight:600; padding:6px 0;
+  font-size:10px; font-weight:600; padding:4px 1px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .tabbar a.active{color:var(--teal);}
-.tabbar a .g{display:block; font-size:19px; margin-bottom:2px;}
+.tabbar a .g{display:block; font-size:17px; margin-bottom:1px;}
 
 .spinner{
   width:16px;height:16px; border-radius:50%; border:2px solid rgba(255,255,255,0.4);
