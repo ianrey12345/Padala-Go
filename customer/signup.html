@@ -42,6 +42,10 @@
         <label for="password">Password</label>
         <input type="password" id="password" placeholder="At least 6 characters" minlength="6" required>
       </div>
+      <div class="field">
+        <label for="confirmPassword">Confirm password</label>
+        <input type="password" id="confirmPassword" placeholder="Re-enter your password" minlength="6" required>
+      </div>
 
       <button type="submit" class="btn btn-primary" id="signUpBtn">Sign Up</button>
     </form>
@@ -64,13 +68,24 @@ const signUpBtn = document.getElementById('signUpBtn');
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
   errorBanner.style.display = "none";
-  signUpBtn.disabled = true;
-  signUpBtn.innerHTML = '<span class="spinner"></span> Creating account…';
 
   const name = document.getElementById('name').value.trim();
   const phone = document.getElementById('phone').value.trim();
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
+  const confirmPassword = document.getElementById('confirmPassword').value;
+
+  // Checked before anything touches Firebase — no point creating an
+  // account (or even attempting to) if the two password fields don't
+  // agree with each other.
+  if(password !== confirmPassword){
+    errorBanner.textContent = "Passwords don't match. Please re-enter them.";
+    errorBanner.style.display = "block";
+    return;
+  }
+
+  signUpBtn.disabled = true;
+  signUpBtn.innerHTML = '<span class="spinner"></span> Creating account…';
 
   try{
     const cred = await auth.createUserWithEmailAndPassword(email, password);
@@ -99,6 +114,7 @@ function friendlyError(code){
 }
 </script>
 <script src="../shared/ios-install-banner.js"></script>
+<script src="../shared/password-toggle.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
