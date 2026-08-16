@@ -16,8 +16,11 @@
      messages list scrolls and the composer sits right above the tabbar,
      instead of the isolated full-screen layout chat-thread.html uses —
      this page is a persistent tab, not a drill-in, so it needs the
-     regular topbar+tabbar navigation to stay reachable. */
-  .content{ display:flex; flex-direction:column; padding:0; overflow:hidden; }
+     regular topbar+tabbar navigation to stay reachable.
+     padding-bottom reserves space for the fixed .tabbar, same amount
+     the default .content class normally reserves — without it the
+     composer ends up hidden underneath the tabbar. */
+  .content{ display:flex; flex-direction:column; padding:0; padding-bottom:calc(70px + env(safe-area-inset-bottom)); overflow:hidden; }
   .messages{ flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
   .bubble{ max-width:75%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.4; word-wrap:break-word; }
   .bubble.mine{ align-self:flex-end; background:var(--teal); color:#fff; border-bottom-right-radius:4px; }
