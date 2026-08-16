@@ -1,52 +1,122 @@
-// Padala Go — keeps the screen from dimming/locking while the app is
-// open. Self-contained (no external library) — plays a muted, invisible,
-// looping video appended directly to the page. This is the same
-// underlying trick NoSleep.js uses as a fallback, but implemented
-// directly here so it's fully debuggable and not dependent on that
-// library's own (unreliable, on this device) native-API detection.
+// Padala Go — screen wake lock
+// Keeps the screen from dimming/locking while the app is open (rider on
+// an active delivery, customer waiting on an order). Two strategies:
+//   1. Native Screen Wake Lock API (navigator.wakeLock) where supported.
+//   2. A silent, muted, looping 1x1 video as a fallback for browsers
+//      without the native API (notably iOS Safari) — written directly
+//      here instead of via NoSleep.js, since NoSleep's own feature
+//      check (`"wakeLock" in navigator`) can't be reliably forced down
+//      the fallback path.
 //
-// Include this script tag near the bottom of <body>, after your other
-// scripts — it assumes document.body already exists when it runs.
+// KNOWN LIMITATION: on iOS, this reliably works in a regular Safari tab.
+// In a standalone "Add to Home Screen" PWA, iOS runs the page in a bare
+// WKWebView that doesn't get the same OS-level "keep screen on during
+// media playback" treatment Safari itself gets — both the native Wake
+// Lock API and the video trick are known to be unreliable there. This
+// is a platform limitation, not something fixable purely with more JS.
+// The MediaSession registration below is a best-effort attempt some
+// developers report helps on certain iOS versions, but isn't guaranteed.
 //
-// IMPORTANT — iOS refuses to let ANY video start playing until the user
-// has made a real tap/click on the page (its autoplay policy). This
-// waits for the very first tap anywhere on the page to start playback,
-// then keeps it playing for the rest of the session, including through
-// idle periods with no touches.
+// Browsers require a user gesture to start video playback or acquire a
+// wake lock, so this arms on the first tap/click and stays armed for
+// the rest of the session, re-acquiring after any tab-hide/show cycle
+// (backgrounding, app switch, screen lock) since both the native lock
+// and video playback are released automatically when the tab goes
+// into the background.
 (function () {
-  var MP4_DATA_URI = 'data:video/mp4;base64,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';
+  var video = null;
+  var nativeLock = null;
+  var armed = false;
 
-  var video = document.createElement('video');
-  video.setAttribute('playsinline', '');
-  video.setAttribute('webkit-playsinline', '');
-  video.setAttribute('muted', '');
-  video.muted = true;
-  video.loop = true;
-  video.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
-  video.src = MP4_DATA_URI;
-  document.body.appendChild(video);
-
-  var enabled = false;
-
-  function enableOnce() {
-    if (enabled) return;
-    enabled = true;
-    video.play().catch(function () {
-      // If the very first attempt is rejected (rare — usually only
-      // happens if called outside a genuine user gesture), allow a
-      // future tap to retry instead of being permanently stuck.
-      enabled = false;
-    });
-    document.removeEventListener('touchstart', enableOnce, true);
-    document.removeEventListener('click', enableOnce, true);
+  function hasNativeWakeLock() {
+    return !!(navigator.wakeLock && typeof navigator.wakeLock.request === 'function');
   }
 
-  document.addEventListener('touchstart', enableOnce, true);
-  document.addEventListener('click', enableOnce, true);
+  function requestNativeLock() {
+    return navigator.wakeLock.request('screen').then(function (lock) {
+      nativeLock = lock;
+      // If the OS/browser releases it on its own (e.g. low battery mode),
+      // clear our reference so the next visibilitychange re-acquires it.
+      nativeLock.addEventListener('release', function () {
+        nativeLock = null;
+      });
+    });
+  }
 
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && enabled) {
+  function buildFallbackVideo() {
+    var v = document.createElement('video');
+    v.setAttribute('playsinline', '');
+    v.setAttribute('muted', '');
+    v.muted = true;
+    v.loop = true;
+    // Positioned off-screen rather than opacity:0 — iOS Safari can treat
+    // opacity:0 media as "invisible" and silently pause it for power
+    // saving, which made earlier versions of this fail even though
+    // play() had resolved successfully.
+    v.style.cssText = 'position:absolute; left:-9999px; top:-9999px; width:1px; height:1px;';
+    // Minimal silent MP4, base64-inlined — no network request needed.
+    v.src = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAr1tZGF0AAACrgYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NCAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjIgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0xIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9ZGlhIHN1Ym1lPTAgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MCBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTAgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTI1IHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAD2WIhAA3//728P4FNjuY0JcRzeidMx+/FQK5PP0z6dR3EAAAAwABDAAA';
+    return v;
+  }
+
+  function playFallbackVideo() {
+    video.play().catch(function () {
+      // Some browsers still reject on the very first attempt even inside
+      // a gesture handler; a queued retry on the next tick usually works.
+      setTimeout(function () { video.play().catch(function () {}); }, 50);
+    });
+
+    // Registering with MediaSession is what iOS uses to drive lock-screen
+    // media controls — on some iOS versions this makes the system treat
+    // this as "real" playback and improves how reliably it holds the
+    // screen awake in standalone (home-screen) mode. Not guaranteed, but
+    // harmless to include.
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: 'Padala Go' });
+        navigator.mediaSession.playbackState = 'playing';
+      } catch (e) {}
+    }
+  }
+
+  function armFallback() {
+    if (!video) {
+      video = buildFallbackVideo();
+      video.addEventListener('pause', function () {
+        if (armed && document.visibilityState === 'visible') {
+          video.play().catch(function () {});
+        }
+      });
+    }
+    if (!video.isConnected) document.body.appendChild(video);
+    playFallbackVideo();
+  }
+
+  function arm() {
+    if (armed) return;
+    armed = true;
+    if (hasNativeWakeLock()) {
+      requestNativeLock().catch(function () {
+        // Native request rejected (e.g. low power mode) — fall back.
+        armFallback();
+      });
+    } else {
+      armFallback();
+    }
+  }
+
+  function reacquireIfNeeded() {
+    if (!armed || document.visibilityState !== 'visible') return;
+    if (hasNativeWakeLock()) {
+      if (!nativeLock) requestNativeLock().catch(function () {});
+    } else if (video && video.paused) {
       video.play().catch(function () {});
     }
+  }
+
+  ['touchend', 'click'].forEach(function (evt) {
+    document.addEventListener(evt, arm, { once: true, passive: true });
   });
+
+  document.addEventListener('visibilitychange', reacquireIfNeeded);
 })();
