@@ -34,6 +34,7 @@
 
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;touch-action:manipulation;}
+html{background:var(--paper);}
 body{
   background:var(--cream);
   color:var(--ink);
@@ -83,7 +84,7 @@ h1,h2,h3{
 
 .content{
   flex:1;
-  padding:22px 20px 100px;
+  padding:22px 20px calc(100px + env(safe-area-inset-bottom));
 }
 
 /* Auth card */
@@ -243,10 +244,12 @@ h1,h2,h3{
 
 /* Bottom tab bar */
 .tabbar{
-  position:sticky; bottom:0; left:0; right:0;
+  position:fixed; bottom:0; left:0; right:0;
   background:var(--paper); border-top:1px solid var(--line);
-  display:flex; padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+  display:flex; align-items:stretch;
+  padding:8px 0 env(safe-area-inset-bottom);
   max-width:480px; margin:0 auto;
+  z-index:100;
 }
 .tabbar a{
   flex:1; text-align:center; text-decoration:none; color:#9B9186;
