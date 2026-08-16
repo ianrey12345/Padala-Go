@@ -1,7 +1,7 @@
-// Padala Go — TEMPORARY DEBUG VERSION of the screen wake-lock script.
-// This version reports its own live status in an on-screen banner so we
-// can see exactly what's happening instead of guessing. Once confirmed
-// working, swap back to the plain (non-debug) version.
+// Padala Go — TEMPORARY DEBUG VERSION (v2) of the screen wake-lock
+// script. Reports each stage separately so we can see exactly where
+// this breaks: whether a tap is even detected, and separately whether
+// enable() actually resolves or rejects.
 (function () {
   function showBanner(text, color) {
     var el = document.getElementById('wakeLockDebugBanner');
@@ -33,22 +33,30 @@
 
   var noSleep = new NoSleep();
   var enabled = false;
+  var tapCount = 0;
 
-  showBanner('✅ NoSleep loaded | native-API override: ' + (overrideWorked ? 'OK' : 'FAILED') + ' | tap screen to arm', '#B67A16');
+  showBanner('✅ loaded | override: ' + (overrideWorked ? 'OK' : 'FAILED') + ' | taps: 0 | tap screen to arm', '#B67A16');
 
   function enableOnce() {
+    tapCount++;
     if (enabled) return;
     enabled = true;
+
+    // Show IMMEDIATELY, synchronously, before calling enable() — this
+    // proves whether the tap itself was detected at all, separate from
+    // whether enable() succeeds.
+    showBanner('👆 tap #' + tapCount + ' detected — calling enable()...', '#2A5FAD');
+
     noSleep.enable().then(function () {
-      showBanner('✅ Wake lock ENABLED (video playing) — leave phone untouched now', '#2F8F5B');
+      showBanner('✅ ENABLED (video playing) — now leave phone untouched', '#2F8F5B');
     }).catch(function (err) {
-      showBanner('❌ enable() FAILED: ' + (err && err.message ? err.message : err), '#D64545');
+      showBanner('❌ enable() FAILED: ' + (err && err.message ? err.message : String(err)), '#D64545');
     });
-    document.removeEventListener('touchstart', enableOnce, true);
-    document.removeEventListener('click', enableOnce, true);
   }
 
   document.addEventListener('touchstart', enableOnce, true);
+  document.addEventListener('touchend', enableOnce, true);
+  document.addEventListener('pointerdown', enableOnce, true);
   document.addEventListener('click', enableOnce, true);
 
   document.addEventListener('visibilitychange', () => {
