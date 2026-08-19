@@ -50,6 +50,28 @@
     background:#E9F5EE; padding:2px 7px; border-radius:8px; margin-left:6px; vertical-align:middle;
   }
   .rider-rating-line{ font-size:11.5px; color:var(--amber); font-weight:700; margin-top:2px; }
+
+  /* Edit Route panel — reuses the same search + tap-to-place-pin pattern
+     as order.html, scoped to this page with its own element IDs so it
+     can coexist with the live tracking map (#trackMap) above it. */
+  .edit-search-wrap{ position:relative; margin-bottom:10px; z-index:2; }
+  .edit-search-wrap input{
+    width:100%; padding:13px 14px; border-radius:12px; border:1.5px solid var(--line);
+    background:var(--paper); font-size:14px; font-family:'Inter'; color:var(--ink);
+  }
+  .edit-search-wrap input:focus{ outline:none; border-color:var(--teal); }
+  .edit-search-results{
+    position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:1000;
+    background:var(--paper); border:1.5px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow); max-height:220px; overflow-y:auto;
+  }
+  .edit-search-result-row{ padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .edit-search-result-row:last-child{ border-bottom:none; }
+  .edit-search-result-row:hover, .edit-search-result-row:active{ background:var(--cream); }
+  .edit-search-result-row .r-title{ font-size:13.5px; font-weight:600; color:var(--ink); }
+  .edit-search-result-row .r-sub{ font-size:12px; color:#8A8178; margin-top:2px; }
+  .edit-search-note{ padding:12px 14px; font-size:13px; color:#8A8178; }
+  #editMap{ height:220px; border-radius:var(--radius); box-shadow:var(--shadow); position:relative; z-index:1; margin-top:2px; }
 </style>
 </head>
 <body>
@@ -61,6 +83,44 @@
 
   <div class="content" id="content">
     <div class="order-card" id="orderCard">Loading order…</div>
+
+    <div id="editRouteToggleWrap" style="margin-top:10px; display:none;">
+      <button type="button" class="btn btn-outline btn-sm" id="editRouteToggleBtn">✏️ Edit Route</button>
+    </div>
+
+    <div class="order-card" id="editRouteSection" style="display:none; margin-top:10px;">
+      <h3 style="font-size:15px; margin-bottom:10px;">Edit pickup / drop-off</h3>
+
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button type="button" class="btn btn-sm" id="editModePickupBtn" style="flex:1; background:var(--teal); color:#fff;">📍 Pickup</button>
+        <button type="button" class="btn btn-sm" id="editModeDropoffBtn" style="flex:1; background:var(--line); color:var(--ink);">🎯 Drop-off</button>
+      </div>
+
+      <div class="edit-search-wrap" id="editSearchWrap">
+        <input type="text" id="editSearchInput" placeholder="Search a place for pickup…" autocomplete="off">
+        <div id="editSearchResults" class="edit-search-results" style="display:none;"></div>
+      </div>
+
+      <div id="editMap"></div>
+      <div class="hint" id="editMapHint">Tap the map to move your pickup point.</div>
+
+      <div class="point-row">
+        <div class="marker pickup"></div>
+        <div class="addr" id="editPickupAddr">—</div>
+      </div>
+      <div class="point-row">
+        <div class="marker dropoff"></div>
+        <div class="addr" id="editDropoffAddr">—</div>
+      </div>
+
+      <div class="hint" id="editFarePreview" style="margin-top:10px;"></div>
+      <div id="editRouteError" class="error-banner" style="margin-top:10px;"></div>
+
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button type="button" class="btn btn-outline" id="editRouteCancelBtn" style="flex:1;">Cancel</button>
+        <button type="button" class="btn btn-primary" id="editRouteSaveBtn" style="flex:1;" disabled>Save Changes</button>
+      </div>
+    </div>
 
     <div id="requestsSection" style="margin-top:20px; display:none;">
       <h3 style="font-size:15px;">Riders who requested this delivery</h3>
@@ -151,13 +211,18 @@ const params = new URLSearchParams(window.location.search);
 const orderId = params.get('id');
 let currentUser = null;
 let currentOrderData = null;
+let myName = 'Customer';
 
-requireAuth(user=>{
+requireAuth(async user=>{
   currentUser = user;
   watchForNewRequests(user.uid);
   watchForRiderArrival(user.uid);
   watchForOrderCompletion(user.uid);
   if(!orderId){ window.location.href = "my-orders.html"; return; }
+  try{
+    const myDoc = await db.collection('users').doc(user.uid).get();
+    if(myDoc.exists) myName = myDoc.data().name || 'Customer';
+  } catch(e){ /* keep default label — only used for the chat notice below */ }
   listenToOrder();
 });
 
@@ -431,6 +496,7 @@ function listenToOrder(){
     currentOrderData = o;
     renderOrder(o);
     renderRatingSection(o);
+    updateEditRouteAvailability(o);
 
     if(o.status === 'pending'){
       document.getElementById('requestsSection').style.display = 'block';
@@ -635,6 +701,336 @@ async function confirmRider(riderId, reqId){
 
   await batch.commit();
 }
+
+/* ---------------------------------------------------------
+   Edit Route — lets the customer move pickup and/or drop-off any
+   time before the order is completed or cancelled, even after a
+   rider is already assigned. Reuses the same tap-the-map /
+   search-a-place pattern as order.html, scoped to this page with
+   its own element IDs (#editMap, #editSearchInput, etc.) so it can
+   coexist with the live tracking map above it. Saving recalculates
+   distance + fare via the same shared distanceKmBetween/computeFare
+   functions order.html uses, and — if a rider is already assigned —
+   drops a note in the existing order chat so they see the change and
+   the new fare.
+   --------------------------------------------------------- */
+const EDIT_ROUTE_STATUSES = ['pending', 'confirmed', 'in_progress'];
+
+let editMap = null;
+let editMapReady = false;
+let editPickupMarker = null, editDropoffMarker = null;
+let editPickupPoint = null, editDropoffPoint = null; // {lat,lng,address,...}
+let editActiveMode = 'pickup';
+let editRouteChanged = false;
+let editSearchDebounceTimer = null;
+let editSearchAbortController = null;
+
+const editPickupIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:20px;height:20px;border-radius:50%;background:#0C4A45;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [20,20], iconAnchor: [10,10]
+});
+const editDropoffIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:20px;height:20px;border-radius:50%;background:#F0A93A;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>',
+  iconSize: [20,20], iconAnchor: [10,10]
+});
+
+function updateEditRouteAvailability(o){
+  const toggleWrap = document.getElementById('editRouteToggleWrap');
+  const isEditable = EDIT_ROUTE_STATUSES.includes(o.status);
+  toggleWrap.style.display = isEditable ? 'block' : 'none';
+  // If the order stops being editable while the panel happens to be open
+  // (e.g. it got cancelled or completed elsewhere while this page was
+  // sitting open), close it rather than leaving a dead editor visible.
+  if(!isEditable){
+    document.getElementById('editRouteSection').style.display = 'none';
+  }
+}
+
+document.getElementById('editRouteToggleBtn').addEventListener('click', ()=>{
+  const section = document.getElementById('editRouteSection');
+  const opening = section.style.display === 'none';
+  section.style.display = opening ? 'block' : 'none';
+  if(opening && currentOrderData){
+    openEditRoute(currentOrderData);
+  }
+});
+
+document.getElementById('editRouteCancelBtn').addEventListener('click', ()=>{
+  document.getElementById('editRouteSection').style.display = 'none';
+  document.getElementById('editRouteError').style.display = 'none';
+});
+
+function setEditMode(mode){
+  editActiveMode = mode;
+  const pickupBtn = document.getElementById('editModePickupBtn');
+  const dropoffBtn = document.getElementById('editModeDropoffBtn');
+  pickupBtn.style.background = mode === 'pickup' ? 'var(--teal)' : 'var(--line)';
+  pickupBtn.style.color = mode === 'pickup' ? '#fff' : 'var(--ink)';
+  dropoffBtn.style.background = mode === 'dropoff' ? 'var(--teal)' : 'var(--line)';
+  dropoffBtn.style.color = mode === 'dropoff' ? '#fff' : 'var(--ink)';
+  document.getElementById('editMapHint').textContent = mode === 'pickup'
+    ? 'Tap the map to move your pickup point.'
+    : 'Tap the map to move your drop-off point.';
+  document.getElementById('editSearchInput').placeholder = mode === 'pickup'
+    ? 'Search a place for pickup…'
+    : 'Search a place for drop-off…';
+}
+document.getElementById('editModePickupBtn').addEventListener('click', ()=> setEditMode('pickup'));
+document.getElementById('editModeDropoffBtn').addEventListener('click', ()=> setEditMode('dropoff'));
+
+function openEditRoute(o){
+  setEditMode('pickup');
+  editRouteChanged = false;
+  document.getElementById('editRouteSaveBtn').disabled = true;
+  document.getElementById('editRouteError').style.display = 'none';
+
+  if(!editMapReady){
+    editMapReady = true;
+    editMap = L.map('editMap', { zoomControl: true }).setView([o.pickup.lat, o.pickup.lng], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(editMap);
+    editMap.on('click', (e)=>{
+      editPlacePoint(editActiveMode, { lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+  }
+
+  // Pre-fill from the order's current points WITHOUT going through
+  // editPlacePoint (that would trigger a reverse-geocode + fare
+  // recalc + mark the route as changed) — this is just loading in
+  // the existing, already-known state.
+  editPickupPoint = { ...o.pickup };
+  editDropoffPoint = { ...o.dropoff };
+  addOrMoveEditMarker('pickup', editPickupPoint);
+  addOrMoveEditMarker('dropoff', editDropoffPoint);
+  document.getElementById('editPickupAddr').textContent = o.pickup.address;
+  document.getElementById('editDropoffAddr').textContent = o.dropoff.address;
+  renderEditFarePreview();
+
+  // Needs a real size for the container — invalidateSize covers the
+  // first render right after the panel goes from display:none to visible.
+  setTimeout(()=>{
+    editMap.invalidateSize();
+    editMap.fitBounds([[o.pickup.lat, o.pickup.lng],[o.dropoff.lat, o.dropoff.lng]], { padding:[40,40] });
+  }, 0);
+}
+
+function addOrMoveEditMarker(kind, point){
+  const icon = kind === 'pickup' ? editPickupIcon : editDropoffIcon;
+  if(kind === 'pickup'){
+    if(editPickupMarker){ editPickupMarker.setLatLng([point.lat, point.lng]); }
+    else{
+      editPickupMarker = L.marker([point.lat, point.lng], { icon, draggable:true }).addTo(editMap);
+      editPickupMarker.on('dragend', ()=> onEditMarkerMoved('pickup', editPickupMarker));
+    }
+  } else {
+    if(editDropoffMarker){ editDropoffMarker.setLatLng([point.lat, point.lng]); }
+    else{
+      editDropoffMarker = L.marker([point.lat, point.lng], { icon, draggable:true }).addTo(editMap);
+      editDropoffMarker.on('dragend', ()=> onEditMarkerMoved('dropoff', editDropoffMarker));
+    }
+  }
+}
+
+function editPlacePoint(kind, point, precomputedGeo){
+  addOrMoveEditMarker(kind, point);
+  const apply = (geo)=>{
+    const full = { lat: point.lat, lng: point.lng, ...geo };
+    if(kind === 'pickup'){ editPickupPoint = full; } else { editDropoffPoint = full; }
+    document.getElementById(kind === 'pickup' ? 'editPickupAddr' : 'editDropoffAddr').textContent = geo.address;
+    editRouteChanged = true;
+    renderEditFarePreview();
+  };
+  if(precomputedGeo){ apply(precomputedGeo); } else { editReverseGeocode(point, apply); }
+}
+
+function onEditMarkerMoved(kind, marker){
+  const pos = marker.getLatLng();
+  editReverseGeocode({ lat: pos.lat, lng: pos.lng }, (geo)=>{
+    const full = { lat: pos.lat, lng: pos.lng, ...geo };
+    if(kind === 'pickup'){ editPickupPoint = full; } else { editDropoffPoint = full; }
+    document.getElementById(kind === 'pickup' ? 'editPickupAddr' : 'editDropoffAddr').textContent = geo.address;
+    editRouteChanged = true;
+    renderEditFarePreview();
+  });
+}
+
+async function editReverseGeocode(point, cb){
+  try{
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${point.lat}&lon=${point.lng}&zoom=18&addressdetails=1`
+    );
+    const data = await res.json();
+    if(data && data.display_name){
+      const a = data.address || {};
+      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+      cb({
+        address: data.display_name,
+        municipality,
+        landmark: extractLandmark(a, data.display_name),
+        street: a.road || ''
+      });
+    } else {
+      const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+      cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
+    }
+  } catch(err){
+    const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+    cb({ address: fallback, municipality: '', landmark: fallback, street: '' });
+  }
+}
+
+// Same landmark-picking logic as order.html's forward/reverse search results.
+function extractLandmark(a, displayName){
+  return a.amenity || a.shop || a.building || a.leisure || a.tourism || a.office || a.name
+    || (a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road)
+    || (displayName ? displayName.split(',')[0].trim() : '');
+}
+
+const editSearchInput = document.getElementById('editSearchInput');
+const editSearchResultsEl = document.getElementById('editSearchResults');
+
+editSearchInput.addEventListener('input', ()=>{
+  clearTimeout(editSearchDebounceTimer);
+  const q = editSearchInput.value.trim();
+  if(q.length < 3){
+    editSearchResultsEl.style.display = 'none';
+    editSearchResultsEl.innerHTML = '';
+    return;
+  }
+  editSearchDebounceTimer = setTimeout(()=> runEditSearch(q), 400);
+});
+editSearchInput.addEventListener('focus', ()=>{
+  if(editSearchResultsEl.innerHTML) editSearchResultsEl.style.display = 'block';
+});
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('#editSearchWrap')) editSearchResultsEl.style.display = 'none';
+});
+
+async function runEditSearch(query){
+  editSearchResultsEl.style.display = 'block';
+  editSearchResultsEl.innerHTML = `<div class="edit-search-note">Searching…</div>`;
+
+  if(editSearchAbortController) editSearchAbortController.abort();
+  editSearchAbortController = new AbortController();
+
+  try{
+    const center = editMap.getCenter();
+    const viewbox = `${center.lng - 0.5},${center.lat + 0.5},${center.lng + 0.5},${center.lat - 0.5}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}` +
+      `&addressdetails=1&limit=6&countrycodes=ph&viewbox=${viewbox}&bounded=0`;
+    const res = await fetch(url, { signal: editSearchAbortController.signal });
+    const results = await res.json();
+
+    if(!results.length){
+      editSearchResultsEl.innerHTML = `<div class="edit-search-note">No results found.</div>`;
+      return;
+    }
+
+    editSearchResultsEl.innerHTML = '';
+    results.forEach(r=>{
+      const a = r.address || {};
+      const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+      const row = document.createElement('div');
+      row.className = 'edit-search-result-row';
+      const titleEl = document.createElement('div');
+      titleEl.className = 'r-title';
+      titleEl.textContent = extractLandmark(a, r.display_name);
+      const subEl = document.createElement('div');
+      subEl.className = 'r-sub';
+      subEl.textContent = [a.road, municipality].filter(Boolean).join(', ') || r.display_name;
+      row.appendChild(titleEl);
+      row.appendChild(subEl);
+      row.addEventListener('click', ()=> selectEditSearchResult(r));
+      editSearchResultsEl.appendChild(row);
+    });
+  } catch(err){
+    if(err.name === 'AbortError') return;
+    editSearchResultsEl.innerHTML = `<div class="edit-search-note">Search failed — try again.</div>`;
+  }
+}
+
+function selectEditSearchResult(r){
+  const point = { lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+  const a = r.address || {};
+  const municipality = a.city || a.town || a.municipality || a.village || a.county || '';
+
+  editPlacePoint(editActiveMode, point, {
+    address: r.display_name,
+    municipality,
+    landmark: extractLandmark(a, r.display_name),
+    street: a.road || ''
+  });
+
+  editSearchInput.value = '';
+  editSearchResultsEl.style.display = 'none';
+  editSearchResultsEl.innerHTML = '';
+  editMap.setView([point.lat, point.lng], 16);
+}
+
+function renderEditFarePreview(){
+  const preview = document.getElementById('editFarePreview');
+  const saveBtn = document.getElementById('editRouteSaveBtn');
+  if(!editPickupPoint || !editDropoffPoint){
+    preview.textContent = '';
+    saveBtn.disabled = true;
+    return;
+  }
+  const km = distanceKmBetween(editPickupPoint, editDropoffPoint);
+  const newFare = computeFare(km);
+  const oldFare = currentOrderData ? currentOrderData.fare : newFare;
+  preview.textContent = editRouteChanged
+    ? `New distance: ${km.toFixed(2)} km · New fare: ${fmtPeso(newFare)}${newFare !== oldFare ? ` (was ${fmtPeso(oldFare)})` : ''}`
+    : '';
+  saveBtn.disabled = !editRouteChanged;
+}
+
+document.getElementById('editRouteSaveBtn').addEventListener('click', async ()=>{
+  if(!editPickupPoint || !editDropoffPoint || !currentOrderData) return;
+  const saveBtn = document.getElementById('editRouteSaveBtn');
+  const errorBox = document.getElementById('editRouteError');
+  errorBox.style.display = 'none';
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span class="spinner"></span> Saving…';
+
+  const km = distanceKmBetween(editPickupPoint, editDropoffPoint);
+  const newFare = computeFare(km);
+  const oldFare = currentOrderData.fare;
+  const hadRider = !!currentOrderData.riderId;
+
+  try{
+    await db.collection('orders').doc(orderId).update({
+      pickup: editPickupPoint,
+      dropoff: editDropoffPoint,
+      distanceKm: parseFloat(km.toFixed(2)),
+      fare: newFare,
+      routeEditedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Let an already-assigned rider know in the existing chat — this is
+    // the same thread they already see under Chat, so no new UI needed
+    // on their side to surface it.
+    if(hadRider){
+      await db.collection('orders').doc(orderId).collection('messages').add({
+        senderId: currentUser.uid,
+        senderRole: 'customer',
+        senderName: myName,
+        text: `📍 Route updated — new fare: ${fmtPeso(newFare)}${newFare !== oldFare ? ` (was ${fmtPeso(oldFare)})` : ''}`,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(()=>{ /* order update itself already succeeded — a missed chat note isn't worth failing the save over */ });
+    }
+
+    document.getElementById('editRouteSection').style.display = 'none';
+  } catch(err){
+    errorBox.textContent = "Couldn't save your route changes. Please try again.";
+    errorBox.style.display = 'block';
+  }
+  saveBtn.disabled = false;
+  saveBtn.textContent = 'Save Changes';
+});
 </script>
 <script src="../shared/ios-install-banner.js"></script>
 <script>
