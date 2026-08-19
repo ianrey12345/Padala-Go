@@ -47,7 +47,14 @@
         <input type="password" id="confirmPassword" placeholder="Re-enter your password" minlength="6" required>
       </div>
 
-      <button type="submit" class="btn btn-primary" id="signUpBtn">Sign Up</button>
+      <div style="display:flex; align-items:flex-start; gap:10px; margin:18px 0 6px;">
+        <input type="checkbox" id="agreeTerms" required style="margin-top:3px; width:16px; height:16px; flex-shrink:0; accent-color:var(--teal);">
+        <label for="agreeTerms" style="font-size:12.5px; color:#6C7A78; font-weight:400; line-height:1.4;">
+          By checking this box, I agree to the <a href="terms.html" target="_blank" style="color:var(--teal); font-weight:600;">Terms of Service</a> and <a href="privacy.html" target="_blank" style="color:var(--teal); font-weight:600;">Privacy Policy</a>, and consent to the processing of my personal information as described therein.
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="signUpBtn" disabled>Sign Up</button>
     </form>
 
     <p style="text-align:center; font-size:13.5px; color:#6C7A78; margin-top:18px;">
@@ -64,6 +71,14 @@
 const form = document.getElementById('signupForm');
 const errorBanner = document.getElementById('errorBanner');
 const signUpBtn = document.getElementById('signUpBtn');
+const agreeTermsCheckbox = document.getElementById('agreeTerms');
+
+// Sign Up stays disabled until the box is checked — this listener keeps
+// that current even if the person checks/unchecks it a few times before
+// submitting.
+agreeTermsCheckbox.addEventListener('change', ()=>{
+  signUpBtn.disabled = !agreeTermsCheckbox.checked;
+});
 
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -75,9 +90,15 @@ form.addEventListener('submit', async (e)=>{
   const password = document.getElementById('password').value;
   const confirmPassword = document.getElementById('confirmPassword').value;
 
-  // Checked before anything touches Firebase — no point creating an
-  // account (or even attempting to) if the two password fields don't
-  // agree with each other.
+  // Belt-and-suspenders check — the button is already disabled without
+  // this, but the checkbox has `required` too in case JS ever fails to
+  // load for some reason.
+  if(!agreeTermsCheckbox.checked){
+    errorBanner.textContent = "Please agree to the Terms of Service and Privacy Policy to continue.";
+    errorBanner.style.display = "block";
+    return;
+  }
+
   if(password !== confirmPassword){
     errorBanner.textContent = "Passwords don't match. Please re-enter them.";
     errorBanner.style.display = "block";
@@ -92,6 +113,7 @@ form.addEventListener('submit', async (e)=>{
     await db.collection('users').doc(cred.user.uid).set({
       name, phone, email,
       role: 'customer',
+      agreedToTermsAt: firebase.firestore.FieldValue.serverTimestamp(),
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     await cred.user.sendEmailVerification().catch(()=>{});

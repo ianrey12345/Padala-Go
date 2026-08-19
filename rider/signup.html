@@ -67,7 +67,14 @@
         <img id="licenseBackPreview" style="display:none; margin-top:8px; width:100%; max-width:260px; border-radius:10px; border:1.5px solid var(--line);">
       </div>
 
-      <button type="submit" class="btn btn-primary" id="signUpBtn">Sign Up</button>
+      <div style="display:flex; align-items:flex-start; gap:10px; margin:18px 0 6px;">
+        <input type="checkbox" id="agreeTerms" required style="margin-top:3px; width:16px; height:16px; flex-shrink:0; accent-color:var(--teal);">
+        <label for="agreeTerms" style="font-size:12.5px; color:#6C7A78; font-weight:400; line-height:1.4;">
+          By checking this box, I agree to the <a href="terms.html" target="_blank" style="color:var(--teal); font-weight:600;">Terms of Service</a> and <a href="privacy.html" target="_blank" style="color:var(--teal); font-weight:600;">Privacy Policy</a>, and consent to the processing of my personal information as described therein.
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="signUpBtn" disabled>Sign Up</button>
     </form>
 
     <p style="text-align:center; font-size:13.5px; color:#6C7A78; margin-top:18px;">
@@ -84,6 +91,12 @@
 const form = document.getElementById('signupForm');
 const errorBanner = document.getElementById('errorBanner');
 const signUpBtn = document.getElementById('signUpBtn');
+const agreeTermsCheckbox = document.getElementById('agreeTerms');
+
+// Sign Up stays disabled until the box is checked.
+agreeTermsCheckbox.addEventListener('change', ()=>{
+  signUpBtn.disabled = !agreeTermsCheckbox.checked;
+});
 
 // Free image hosting via Cloudinary's unsigned upload API — no backend
 // server needed, safe to call directly from the browser. CLOUD_NAME and
@@ -135,6 +148,13 @@ async function uploadRiderDoc(uid, filename, file){
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
   errorBanner.style.display = "none";
+
+  if(!agreeTermsCheckbox.checked){
+    errorBanner.textContent = "Please agree to the Terms of Service and Privacy Policy to continue.";
+    errorBanner.style.display = "block";
+    return;
+  }
+
   signUpBtn.disabled = true;
   signUpBtn.innerHTML = '<span class="spinner"></span> Creating account…';
 
@@ -178,6 +198,7 @@ form.addEventListener('submit', async (e)=>{
       walletBalance: 0,
       profilePhotoUrl, licenseFrontUrl, licenseBackUrl,
       verificationStatus: 'pending',
+      agreedToTermsAt: firebase.firestore.FieldValue.serverTimestamp(),
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     await cred.user.sendEmailVerification().catch(()=>{});
@@ -200,6 +221,7 @@ function friendlyError(code){
 }
 </script>
 <script src="../shared/ios-install-banner.js"></script>
+<script src="../shared/password-toggle.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
