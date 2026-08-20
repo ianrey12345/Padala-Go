@@ -43,7 +43,18 @@
   .wallet-pill .warn{ font-size:13px; }
 
   .auto-mode-fab{
-    position:fixed; top:calc(70px + env(safe-area-inset-top)); right:20px; left:auto;
+    /* .app-shell is centered with max-width:480px, but this pill uses
+       position:fixed — which measures right:20px from the edge of the
+       whole browser window, not from the app card. On any screen wider
+       than 480px that leaves a gap between the card and the window edge,
+       and the pill floats out in that gap instead of sitting on the card.
+       This calc() finds the app-shell's real right edge (half of
+       whatever space is left over once the 480px column is centered)
+       and adds the same 20px inset on top of it — on a phone-width
+       screen (<=480px) the calc reduces right back down to plain 20px,
+       so mobile behavior is unchanged. */
+    position:fixed; top:calc(70px + env(safe-area-inset-top));
+    right:calc((100vw - min(480px, 100vw)) / 2 + 20px); left:auto;
     z-index:900; display:flex; align-items:center; gap:7px; padding:9px 16px; border-radius:22px;
     font-size:13px; font-weight:700; border:none; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,0.25);
     font-family:'Inter',sans-serif;
