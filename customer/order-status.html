@@ -299,6 +299,26 @@ function ensureTrackMap(o){
   trackDropoffMarker = L.marker([o.dropoff.lat, o.dropoff.lng], { icon: trackDropoffIcon, title: 'Drop-off: ' + o.dropoff.address }).addTo(trackMap);
 }
 
+// ensureTrackMap only ever creates trackPickupMarker/trackDropoffMarker
+// once (guarded by trackMapReady) — so if the customer edits the route
+// after the map has already loaded, those two markers would otherwise
+// stay frozen at the order's *original* coordinates forever, even though
+// the order doc (and the address text above the map) has moved on.
+// This repositions them on every snapshot update, the same way the
+// rider's own marker already gets setLatLng()'d below.
+function updateTrackPickupDropoffMarkers(o){
+  if(trackPickupMarker){
+    trackPickupMarker.setLatLng([o.pickup.lat, o.pickup.lng]);
+    trackPickupMarker.options.title = 'Pickup: ' + o.pickup.address;
+    if(trackPickupMarker._icon) trackPickupMarker._icon.title = trackPickupMarker.options.title;
+  }
+  if(trackDropoffMarker){
+    trackDropoffMarker.setLatLng([o.dropoff.lat, o.dropoff.lng]);
+    trackDropoffMarker.options.title = 'Drop-off: ' + o.dropoff.address;
+    if(trackDropoffMarker._icon) trackDropoffMarker._icon.title = trackDropoffMarker.options.title;
+  }
+}
+
 function updateTrackingMap(o){
   const mapCard = document.getElementById('mapCard');
   const trackTitle = document.getElementById('trackTitle');
@@ -313,6 +333,7 @@ function updateTrackingMap(o){
 
   mapCard.style.display = 'block';
   ensureTrackMap(o);
+  updateTrackPickupDropoffMarkers(o);
   startCustomerLocationBroadcast();
 
   const boundsPoints = [
