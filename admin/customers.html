@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Customers · Padala Go Admin</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<style>
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .topbar-links{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
+  .logout-link{ color:#fff; opacity:0.85; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
+
+  .search-row{ margin-bottom:16px; }
+  .search-row input{
+    width:100%; padding:12px 14px; border-radius:12px; border:1.5px solid var(--line);
+    background:var(--paper); font-size:14px; font-family:'Inter'; color:var(--ink); box-shadow:var(--shadow);
+  }
+  .search-row input:focus{ outline:none; border-color:var(--teal); }
+
+  .customer-card{
+    background:var(--paper); border-radius:14px; padding:16px; margin-bottom:12px;
+    box-shadow:var(--shadow); border:1.5px solid var(--line);
+  }
+  .customer-card .top-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .customer-card .name{ font-size:15.5px; font-weight:700; color:var(--teal-dark); }
+  .customer-card .since{ font-size:11.5px; color:#8A8178; margin-top:2px; }
+
+  .contact-row{
+    display:flex; justify-content:space-between; align-items:center; background:var(--cream);
+    border-radius:10px; padding:9px 12px; margin-top:8px; font-size:13px;
+  }
+  .contact-row .lbl{ font-weight:700; color:#8A8178; }
+  .contact-row .val{ font-family:'Space Mono'; font-weight:700; color:var(--teal-dark); word-break:break-all; text-align:right; }
+
+  .count-pill{
+    font-size:12px; color:#8A8178; font-weight:600; margin-bottom:14px;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <div class="topbar">
+    <div class="topbar-row">
+      <div>
+        <div class="eyebrow">Padala Go Admin</div>
+        <h1>Customers</h1>
+        <div class="sub">Contact info on file — no approval needed</div>
+      </div>
+      <div class="topbar-links">
+        <a href="riders.html" class="logout-link">🏍️ Riders</a>
+        <a href="requests.html" class="logout-link">🧾 Refill Requests</a>
+        <a href="order-history.html" class="logout-link">📦 Order History</a>
+        <a href="support.html" class="logout-link">🎧 Support</a>
+        <a href="#" id="logoutLink" class="logout-link">🚪 Log Out</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="Search by name, email, or number…" autocomplete="off">
+    </div>
+    <div class="count-pill" id="countPill"></div>
+
+    <div id="customersList">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="../shared/firebase-config.js"></script>
+<script>
+let allCustomers = []; // [{ id, c }]
+let searchTerm = '';
+
+requireAdminAuth(()=>{
+  listenToCustomers();
+});
+
+function listenToCustomers(){
+  db.collection('users')
+    .where('role','==','customer')
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      allCustomers = snap.docs.map(doc=> ({ id: doc.id, c: doc.data() }));
+      renderList();
+    }, err=>{
+      document.getElementById('customersList').innerHTML =
+        `<div class="empty-state">Couldn't load customers. Check the browser console for a Firestore index link if this is your first time here.</div>`;
+    });
+}
+
+// Simple client-side filter across the three fields an admin would
+// actually search by — fine at this scale, no need for a search index.
+function matchesSearch(c, term){
+  if(!term) return true;
+  const haystack = `${c.name || ''} ${c.email || ''} ${c.phone || ''}`.toLowerCase();
+  return haystack.includes(term.toLowerCase());
+}
+
+function renderList(){
+  const list = document.getElementById('customersList');
+  const filtered = allCustomers.filter(({ c })=> matchesSearch(c, searchTerm));
+
+  document.getElementById('countPill').textContent =
+    searchTerm ? `${filtered.length} of ${allCustomers.length} customers` : `${allCustomers.length} customer${allCustomers.length === 1 ? '' : 's'}`;
+
+  if(filtered.length === 0){
+    list.innerHTML = allCustomers.length === 0
+      ? `<div class="empty-state"><div class="glyph">🙋</div>No customers signed up yet.</div>`
+      : `<div class="empty-state"><div class="glyph">🔍</div>No customers match "${escapeHtml(searchTerm)}".</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  filtered.forEach(({ id, c })=>{
+    const card = document.createElement('div');
+    card.className = 'customer-card';
+    card.innerHTML = `
+      <div class="top-row">
+        <div>
+          <div class="name">${escapeHtml(c.name || 'Customer')}</div>
+          <div class="since">${c.createdAt ? 'Joined ' + timeAgo(c.createdAt) : ''}</div>
+        </div>
+      </div>
+      <div class="contact-row">
+        <span class="lbl">✉️ Email</span>
+        <span class="val">${escapeHtml(c.email || '—')}</span>
+      </div>
+      <div class="contact-row">
+        <span class="lbl">📱 Mobile Number</span>
+        <span class="val">${escapeHtml(c.phone || '—')}</span>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+document.getElementById('searchInput').addEventListener('input', (e)=>{
+  searchTerm = e.target.value.trim();
+  renderList();
+});
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  await auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>
