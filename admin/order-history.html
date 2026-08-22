@@ -87,7 +87,7 @@
       </div>
     </div>
     <div class="hint" style="margin-bottom:16px;">
-      Gross Fares = total cash customers paid riders for completed deliveries. App Commission = the app's 10% cut of each base fare (added tips/extras are excluded — those go 100% to the rider) — this is what riders' wallets get debited.
+      Gross Fares = total cash customers paid riders for completed deliveries. App Commission = the app's 10% cut of each base fare (added tips/extras are excluded — those go 100% to the rider) — this is what riders' wallets get debited. These three numbers are a permanent running total and won't shrink even after you delete old orders below.
     </div>
 
     <div class="filter-tabs" id="filterTabs">
@@ -124,6 +124,7 @@ let activeFilter = 'all';
 requireAdminAuth((user, adminData)=>{
   currentAdmin = user;
   listenToOrders();
+  listenToPlatformStats();
 });
 
 /* Age is measured from whichever terminal timestamp the order actually
@@ -155,7 +156,6 @@ function listenToOrders(){
         return { id: doc.id, o, ageDays: ageDaysOf(o) };
       });
       updateFilterCounts();
-      updatePlatformStats();
       renderList();
     }, err=>{
       document.getElementById('ordersList').innerHTML =
@@ -176,27 +176,38 @@ function updateFilterCounts(){
   document.getElementById('count-old').textContent = counts.old;
 }
 
-// Sums the app's own earnings across every completed order in view —
-// separate from any single rider's Statistics page, this is the
-// platform-wide total. Only 'completed' orders count (a cancelled order
-// never had commission deducted). Prefers the commissionDeducted field
-// actually recorded at completion time when present (the authoritative
-// figure), falling back to recomputing 10% of the base fare for older
-// orders from before that field existed — same fallback pattern
-// statistics.html already uses per-rider.
-function updatePlatformStats(){
-  const completed = allPastOrders.filter(item=> item.o.status === 'completed');
-  let grossFares = 0;
-  let totalCommission = 0;
-  completed.forEach(({ o })=>{
-    grossFares += totalFare(o);
-    totalCommission += (typeof o.commissionDeducted === 'number')
-      ? o.commissionDeducted
-      : Math.round(o.fare * COMMISSION_RATE);
-  });
-  document.getElementById('statCompletedCount').textContent = completed.length;
-  document.getElementById('statGrossFares').textContent = fmtPeso(grossFares);
-  document.getElementById('statAppCommission').textContent = fmtPeso(totalCommission);
+// Platform-wide commission totals — deliberately NOT derived from the
+// live orders list above (allPastOrders), which shrinks every time an
+// order gets permanently deleted below. Instead this reads every
+// rider's walletTransactions subcollection (type:'commission' entries),
+// via a collection-group query across all riders at once. Those log
+// entries are written once, atomically, the moment an order completes,
+// and deleteOrderCompletely() further down deliberately never touches
+// them — exactly the same persistence guarantee statistics.html already
+// relies on for a single rider's own Earned/Commission numbers, just
+// summed across every rider here. Net effect: these three numbers only
+// ever go up, and stay put no matter how much old order history gets
+// cleaned out below.
+function listenToPlatformStats(){
+  db.collectionGroup('walletTransactions')
+    .where('type','==','commission')
+    .onSnapshot(snap=>{
+      let grossFares = 0;
+      let totalCommission = 0;
+      snap.forEach(doc=>{
+        const t = doc.data();
+        grossFares += (t.fare || 0) + (t.addedAmount || 0);
+        totalCommission += Math.abs(t.amount || 0);
+      });
+      document.getElementById('statCompletedCount').textContent = snap.size;
+      document.getElementById('statGrossFares').textContent = fmtPeso(grossFares);
+      document.getElementById('statAppCommission').textContent = fmtPeso(totalCommission);
+    }, err=>{
+      document.getElementById('statCompletedCount').textContent = '—';
+      document.getElementById('statGrossFares').textContent = '—';
+      document.getElementById('statAppCommission').textContent = '—';
+      console.error('Platform stats failed to load — check the browser console for a Firestore index link, and confirm the walletTransactions collection-group security rule is in place:', err);
+    });
 }
 
 function renderList(){
