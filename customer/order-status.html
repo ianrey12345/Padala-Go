@@ -134,7 +134,14 @@
         </div>
         <div class="route" id="confirmedRiderName"></div>
         <div class="route" id="confirmedRiderVehicle"></div>
-        <a href="#" id="chatWithRiderBtn" class="btn btn-outline btn-sm" style="margin-top:10px; text-decoration:none; display:inline-flex;">💬 Chat with Rider</a>
+        <div style="display:flex; gap:10px; margin-top:10px;">
+          <a href="#" id="chatWithRiderBtn" class="btn btn-outline btn-sm" style="text-decoration:none; display:inline-flex; flex:1; justify-content:center;">💬 Chat</a>
+          <!-- href/visibility set once the assigned rider's own doc is
+               fetched below (see renderOrder → o.riderId block) — this
+               guarantees it can only ever show that specific order's
+               confirmed rider's number, never any other rider's. -->
+          <a href="#" id="callRiderBtn" class="btn btn-outline btn-sm" style="text-decoration:none; display:none; flex:1; justify-content:center; border-color:var(--green); color:var(--green);">📞 Call</a>
+        </div>
       </div>
 
       <div class="order-card" id="mapCard" style="display:none; margin-top:10px; padding:0; overflow:hidden;">
@@ -539,6 +546,14 @@ function listenToOrder(){
             if(r.plate) vehicleBits.push(`Plate ${r.plate}`);
             document.getElementById('confirmedRiderVehicle').textContent =
               vehicleBits.length ? `🏍️ ${vehicleBits.join(' · ')}` : '';
+
+            const callBtn = document.getElementById('callRiderBtn');
+            if(r.phone){
+              callBtn.href = `tel:${r.phone}`;
+              callBtn.style.display = 'inline-flex';
+            } else {
+              callBtn.style.display = 'none';
+            }
           }
         });
       }

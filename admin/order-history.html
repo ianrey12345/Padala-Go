@@ -72,6 +72,24 @@
   </div>
 
   <div class="content">
+    <div class="stat-grid" style="margin-bottom:16px;">
+      <div class="stat-card">
+        <div class="stat-lbl">Completed</div>
+        <div class="stat-val" id="statCompletedCount">0</div>
+      </div>
+      <div class="stat-card earned">
+        <div class="stat-lbl">Gross Fares</div>
+        <div class="stat-val" id="statGrossFares">₱0</div>
+      </div>
+      <div class="stat-card profit">
+        <div class="stat-lbl">App Commission</div>
+        <div class="stat-val" id="statAppCommission">₱0</div>
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:16px;">
+      Gross Fares = total cash customers paid riders for completed deliveries. App Commission = the app's 10% cut of each base fare (added tips/extras are excluded — those go 100% to the rider) — this is what riders' wallets get debited.
+    </div>
+
     <div class="filter-tabs" id="filterTabs">
       <div class="filter-tab active" data-filter="all">All <span class="count" id="count-all">0</span></div>
       <div class="filter-tab" data-filter="recent">Under 7d <span class="count" id="count-recent">0</span></div>
@@ -137,6 +155,7 @@ function listenToOrders(){
         return { id: doc.id, o, ageDays: ageDaysOf(o) };
       });
       updateFilterCounts();
+      updatePlatformStats();
       renderList();
     }, err=>{
       document.getElementById('ordersList').innerHTML =
@@ -155,6 +174,29 @@ function updateFilterCounts(){
   document.getElementById('count-recent').textContent = counts.recent;
   document.getElementById('count-mid').textContent = counts.mid;
   document.getElementById('count-old').textContent = counts.old;
+}
+
+// Sums the app's own earnings across every completed order in view —
+// separate from any single rider's Statistics page, this is the
+// platform-wide total. Only 'completed' orders count (a cancelled order
+// never had commission deducted). Prefers the commissionDeducted field
+// actually recorded at completion time when present (the authoritative
+// figure), falling back to recomputing 10% of the base fare for older
+// orders from before that field existed — same fallback pattern
+// statistics.html already uses per-rider.
+function updatePlatformStats(){
+  const completed = allPastOrders.filter(item=> item.o.status === 'completed');
+  let grossFares = 0;
+  let totalCommission = 0;
+  completed.forEach(({ o })=>{
+    grossFares += totalFare(o);
+    totalCommission += (typeof o.commissionDeducted === 'number')
+      ? o.commissionDeducted
+      : Math.round(o.fare * COMMISSION_RATE);
+  });
+  document.getElementById('statCompletedCount').textContent = completed.length;
+  document.getElementById('statGrossFares').textContent = fmtPeso(grossFares);
+  document.getElementById('statAppCommission').textContent = fmtPeso(totalCommission);
 }
 
 function renderList(){
