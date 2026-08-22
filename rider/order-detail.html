@@ -288,6 +288,12 @@ function updateRiderMarker(pos){
 
 let lastProfileLocationWriteAt = 0;
 function broadcastRiderProfileLocation(pos){
+  // initMap() (and its watchPosition callback) starts running immediately
+  // on page load, independent of requireAuth()'s async Firestore checks —
+  // if a GPS fix comes back before that resolves, currentUser can still be
+  // null here. Skip silently in that case; the next GPS tick (watchPosition
+  // fires repeatedly) will broadcast normally once currentUser is set.
+  if(!currentUser) return;
   // Throttled so a rider just browsing this order doesn't hammer Firestore.
   // Lets customers see an ETA for this rider before deciding to confirm them.
   const now = Date.now();
