@@ -632,33 +632,7 @@ function showDecisionModal(orderId, order){
     }
 
     cleanup();
-
-    // Compute one shared "time to pickup" estimate right at the moment
-    // of acceptance, using a real road route — not a flat-speed guess —
-    // and write it onto the order. This is what lets both the rider's
-    // Map tab and the customer's Order Status page show the exact same
-    // synced countdown immediately, instead of each side quietly
-    // computing its own separate estimate once live GPS data starts
-    // flowing in (which could take a few seconds after Accept, and
-    // could disagree with each other since they'd be computed
-    // independently). If a quick location fix or route isn't available,
-    // this just silently skips — no head-start countdown, but nothing
-    // breaks: both sides' own existing live-location-based ETA logic
-    // still kicks in normally once the rider's Map tab starts
-    // broadcasting position.
-    const orderUpdate = { riderAccepted: true };
-    try{
-      const pos = await new Promise((resolve, reject)=>{
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 4000 });
-      });
-      const riderPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      const route = await fetchRoadRoute(riderPos, { lat: order.pickup.lat, lng: order.pickup.lng });
-      const mins = Math.max(1, Math.round(route.durationMin));
-      orderUpdate.pickupEtaDeadline = firebase.firestore.Timestamp.fromMillis(Date.now() + mins * 60000);
-      orderUpdate.pickupEtaKm = Math.round(route.distanceKm * 10) / 10;
-    } catch(e){ /* no quick fix available — fall back to each side's own live-location ETA */ }
-
-    db.collection('orders').doc(orderId).update(orderUpdate).then(()=>{
+    db.collection('orders').doc(orderId).update({ riderAccepted: true }).then(()=>{
       // Send the rider straight into the Map tab so their live location
       // starts broadcasting immediately — waiting for them to navigate
       // there manually is exactly why the customer's map was stuck on

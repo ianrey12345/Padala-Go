@@ -117,6 +117,12 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Plain Leaflet has no rotation support at all — always north-up, no
+     way to spin the view even by gesture. leaflet-rotate patches Leaflet
+     core to add real map rotation (rotate:true / touchRotate / setBearing),
+     same free-rotate behavior riders expect from Google Maps/Waze. Must
+     load AFTER leaflet.js since it patches the L namespace it defines. -->
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -330,7 +336,11 @@ function ensureMap(){
   if(map) return;
   // zoomControl disabled here, added back explicitly in the top-right corner
   // so it lands clear of the wallet pill and matches a standard mobile-map layout.
-  map = L.map('map', { zoomControl: false }).setView([14.6760, 121.0437], 13);
+  // rotate:true switches on leaflet-rotate's core support; touchRotate
+  // lets the rider spin the view with a two-finger twist gesture, same
+  // as Google Maps/Waze; rotateControl:false hides its default on-screen
+  // rotate widget since the gesture alone covers "rotate freely" here.
+  map = L.map('map', { zoomControl: false, rotate: true, touchRotate: true, rotateControl: false, bearing: 0 }).setView([14.6760, 121.0437], 13);
   L.control.zoom({ position: 'topright' }).addTo(map);
 
   // Recenter button, stacked right below the zoom controls — jumps back
@@ -538,23 +548,6 @@ function listenToActiveOrder(){
       showActiveState();
       renderStage();
       updateCustomerMarker();
-
-      // Seed the countdown from the shared ETA written the instant the
-      // rider tapped Accept (see firebase-config.js) — this is what
-      // makes the pill appear right away instead of sitting hidden until
-      // the first live GPS fix comes in below and updateRouteVisuals()
-      // computes its own estimate. Only seeds once per order (etaDeadlineMs
-      // starts null); updateRouteVisuals()'s own live recalibration is
-      // free to overwrite it moments later with a more current figure —
-      // startEtaCountdown() no-ops if the interval's already running, so
-      // this doesn't fight with that.
-      if(orderData.status === 'confirmed' && !orderData.arrivedAtPickup && orderData.pickupEtaDeadline && etaDeadlineMs === null){
-        document.getElementById('etaPill').style.display = 'inline-block';
-        etaDistanceKm = typeof orderData.pickupEtaKm === 'number' ? orderData.pickupEtaKm : null;
-        etaDeadlineMs = orderData.pickupEtaDeadline.toMillis();
-        startEtaCountdown();
-      }
-
       if(map && riderMarker){
         updateRouteVisuals(riderMarker.getLatLng());
       }
