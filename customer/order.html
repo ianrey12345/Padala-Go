@@ -425,32 +425,74 @@ function selectSearchResult(r){
 }
 
 let addedAmount = 0;
+let currentKm = null;
+let routeRequestId = 0; // guards against a slower earlier request overwriting a newer one
 
-function recalcFare(){
-  if(pickupPoint && dropoffPoint){
-    const km = distanceKmBetween(pickupPoint, dropoffPoint);
-    const fare = computeFare(km);
-    document.getElementById('distanceReadout').textContent = km.toFixed(2) + ' km';
-    document.getElementById('fareReadout').textContent = (fare + addedAmount).toLocaleString('en-PH');
-    document.getElementById('fareBreakdown').textContent =
-      `₱${BASE_FARE} first km + ₱${PER_KM_RATE}/km × ${Math.max(0, km-1).toFixed(2)} succeeding km`;
-    placeOrderBtn.disabled = false;
-    placeOrderBtn.dataset.fare = fare;
-    placeOrderBtn.dataset.km = km.toFixed(2);
+// Refetches the real road route whenever pickup or drop-off changes.
+// Previously this used distanceKmBetween() — a straight-line ("as the
+// crow flies") distance — which is always shorter than the actual road
+// distance the rider has to ride, so the rider was quietly being
+// underpaid on any route where the road isn't a straight line between
+// the two points (a river crossing, a divided highway, a block to go
+// around, etc). fetchRoadRoute() is the same OSRM routing call already
+// used elsewhere in the app (rider Map tab, rider order preview) — this
+// just brings the customer's own fare calculation in line with it.
+async function recalcFare(){
+  if(!(pickupPoint && dropoffPoint)) return;
+
+  const myRequestId = ++routeRequestId;
+  document.getElementById('distanceReadout').textContent = 'Calculating…';
+  placeOrderBtn.disabled = true;
+
+  let km;
+  try{
+    const route = await fetchRoadRoute(pickupPoint, dropoffPoint);
+    km = route.distanceKm;
+  } catch(err){
+    // Routing service unreachable — fall back to straight-line so the
+    // customer can still place an order rather than getting stuck, same
+    // fallback other OSRM callers in this app already use. Rare in
+    // practice, and better than blocking the order entirely.
+    console.warn('Road routing unavailable, falling back to straight-line distance:', err);
+    km = distanceKmBetween(pickupPoint, dropoffPoint);
   }
+
+  // A newer request has since started (the customer moved a pin again
+  // while this one was still in flight) — drop this now-stale result
+  // instead of overwriting the display with an outdated number.
+  if(myRequestId !== routeRequestId) return;
+
+  currentKm = km;
+  updateFareDisplay();
+}
+
+// Just re-renders the fare readout from the already-known distance —
+// used when only addedAmount changes (tip/extra buttons), so those don't
+// trigger a needless extra network round-trip to the routing service.
+function updateFareDisplay(){
+  if(currentKm === null) return;
+  const km = currentKm;
+  const fare = computeFare(km);
+  document.getElementById('distanceReadout').textContent = km.toFixed(2) + ' km';
+  document.getElementById('fareReadout').textContent = (fare + addedAmount).toLocaleString('en-PH');
+  document.getElementById('fareBreakdown').textContent =
+    `₱${BASE_FARE} first km + ₱${PER_KM_RATE}/km × ${Math.max(0, km-1).toFixed(2)} succeeding km`;
+  placeOrderBtn.disabled = false;
+  placeOrderBtn.dataset.fare = fare;
+  placeOrderBtn.dataset.km = km.toFixed(2);
 }
 
 document.querySelectorAll('.add-amount-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     addedAmount += parseInt(btn.dataset.add, 10);
     renderAddedAmount();
-    recalcFare();
+    updateFareDisplay();
   });
 });
 document.getElementById('removeAddedBtn').addEventListener('click', ()=>{
   addedAmount = 0;
   renderAddedAmount();
-  recalcFare();
+  updateFareDisplay();
 });
 function renderAddedAmount(){
   const note = document.getElementById('addAmountNote');
