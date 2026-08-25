@@ -559,15 +559,34 @@ function listenToOrder(){
       }
 
       const etaBanner = document.getElementById('etaBanner');
-      if(o.status === 'confirmed' && !o.arrivedAtPickup && o.riderLocation && o.pickup){
-        const km = distanceKmBetween(o.riderLocation, { lat: o.pickup.lat, lng: o.pickup.lng });
-        const mins = Math.max(1, Math.round((km / 25) * 60)); // same assumed speed as the rider's live map
-        etaBanner.style.display = 'block';
-        document.getElementById('etaSub').textContent = `${km.toFixed(1)} km away`;
-        // Recalibrate the countdown deadline against this fresh location fix —
-        // keeps the per-second tick honest as the rider's actual position updates.
-        etaDeadlineMs = Date.now() + mins * 60000;
-        startEtaCountdown();
+      if(o.status === 'confirmed' && !o.arrivedAtPickup && o.pickup){
+        if(o.riderLocation){
+          // Rider is actively broadcasting live location — most accurate
+          // source available, recalibrate the countdown every update.
+          const km = distanceKmBetween(o.riderLocation, { lat: o.pickup.lat, lng: o.pickup.lng });
+          const mins = Math.max(1, Math.round((km / 25) * 60)); // same assumed speed as the rider's live map
+          etaBanner.style.display = 'block';
+          document.getElementById('etaSub').textContent = `${km.toFixed(1)} km away`;
+          etaDeadlineMs = Date.now() + mins * 60000;
+          startEtaCountdown();
+        } else if(o.pickupEtaDeadline){
+          // Rider hasn't started broadcasting live location yet (Map tab
+          // still loading right after they accepted) — show the shared
+          // road-route estimate computed the instant they tapped Accept
+          // (see firebase-config.js), so the countdown appears right
+          // away instead of sitting blank for those first few seconds.
+          // Only seeds once; the branch above takes over and refines it
+          // the moment real location data starts arriving.
+          etaBanner.style.display = 'block';
+          document.getElementById('etaSub').textContent = typeof o.pickupEtaKm === 'number' ? `${o.pickupEtaKm.toFixed(1)} km away` : '';
+          if(etaDeadlineMs === null){
+            etaDeadlineMs = o.pickupEtaDeadline.toMillis();
+            startEtaCountdown();
+          }
+        } else {
+          etaBanner.style.display = 'none';
+          stopEtaCountdown();
+        }
       } else {
         etaBanner.style.display = 'none';
         stopEtaCountdown();
