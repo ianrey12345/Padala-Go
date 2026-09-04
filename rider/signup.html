@@ -51,7 +51,6 @@
     <p style="color:#6C7A78; font-size:14px; margin-top:0;">Create your rider account.</p>
 
     <div id="errorBanner" class="error-banner"></div>
-    <div id="draftRestoredBanner" class="success-banner"></div>
 
     <form id="signupForm" style="margin-top:20px;">
       <div class="field">
@@ -136,71 +135,6 @@ const agreeTermsCheckbox = document.getElementById('agreeTerms');
 // Sign Up stays disabled until the box is checked.
 agreeTermsCheckbox.addEventListener('change', ()=>{
   signUpBtn.disabled = !agreeTermsCheckbox.checked;
-  saveDraft();
-});
-
-/* ---------------------------------------------------------
-   Draft persistence — the Terms/Privacy links below open with
-   target="_blank", which behaves like a real new tab in a normal
-   browser (this tab is untouched). But in a home-screen-installed PWA
-   there are no real tabs, so it navigates away in place, and coming
-   "back" is a full reload of this page — wiping out anything already
-   entered. sessionStorage survives that reload (it only clears when the
-   tab/app is fully closed), so every keystroke on the text fields is
-   mirrored there and restored on load.
-   Two things are deliberately NOT restorable here:
-   - Password: not saved, so nothing sensitive sits in storage even
-     session-scoped — worth a quick re-type.
-   - The three photo uploads: browsers block setting a file input's
-     value via script for security, on every browser, with no
-     workaround — so those genuinely have to be re-selected. The banner
-     below tells the rider that plainly instead of leaving them to
-     wonder why the previews are blank.
-   --------------------------------------------------------- */
-const DRAFT_KEY = 'padalaSignupDraft_rider';
-const DRAFT_FIELD_IDS = ['name', 'phone', 'plate', 'motorColor', 'email'];
-const draftRestoredBanner = document.getElementById('draftRestoredBanner');
-
-function saveDraft(){
-  const draft = {};
-  DRAFT_FIELD_IDS.forEach(id=>{ draft[id] = document.getElementById(id).value; });
-  draft.agreeTerms = agreeTermsCheckbox.checked;
-  try{ sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch(e){ /* storage unavailable — draft just won't persist */ }
-}
-
-function restoreDraft(){
-  let draft;
-  try{
-    const raw = sessionStorage.getItem(DRAFT_KEY);
-    if(!raw) return;
-    draft = JSON.parse(raw);
-  } catch(e){ return; }
-
-  let restoredAnything = false;
-  DRAFT_FIELD_IDS.forEach(id=>{
-    if(draft[id]){
-      document.getElementById(id).value = draft[id];
-      restoredAnything = true;
-    }
-  });
-  if(draft.agreeTerms){
-    agreeTermsCheckbox.checked = true;
-    signUpBtn.disabled = false;
-  }
-
-  if(restoredAnything){
-    draftRestoredBanner.textContent = "Welcome back — we restored what you'd typed. Please re-select your profile photo and license photos below, though — browsers don't allow those to be saved automatically.";
-    draftRestoredBanner.style.display = 'block';
-  }
-}
-
-function clearDraft(){
-  try{ sessionStorage.removeItem(DRAFT_KEY); } catch(e){}
-}
-
-restoreDraft();
-DRAFT_FIELD_IDS.forEach(id=>{
-  document.getElementById(id).addEventListener('input', saveDraft);
 });
 
 /* ---------------------------------------------------------
@@ -361,7 +295,6 @@ form.addEventListener('submit', async (e)=>{
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     await cred.user.sendEmailVerification().catch(()=>{});
-    clearDraft();
     window.location.href = "verify-email.html";
   } catch(err){
     errorBanner.textContent = "Your account was created, but we couldn't upload your photos. Please sign in and try again from Menu.";
