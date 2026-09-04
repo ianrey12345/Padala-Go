@@ -78,6 +78,56 @@ const agreeTermsCheckbox = document.getElementById('agreeTerms');
 // submitting.
 agreeTermsCheckbox.addEventListener('change', ()=>{
   signUpBtn.disabled = !agreeTermsCheckbox.checked;
+  saveDraft();
+});
+
+/* ---------------------------------------------------------
+   Draft persistence — the Terms/Privacy links below open with
+   target="_blank", which behaves like a real new tab in a normal
+   browser (this tab is untouched). But in a home-screen-installed PWA
+   there are no real tabs, so it navigates away in place, and coming
+   "back" is a full reload of this page — wiping out anything already
+   typed. sessionStorage survives that reload (it only clears when the
+   tab/app is fully closed), so every keystroke is mirrored there and
+   restored on load.
+   Passwords are deliberately NOT saved here — re-typing a password
+   after checking a policy page is a small price for not leaving even a
+   session-scoped copy of it sitting in storage.
+   --------------------------------------------------------- */
+const DRAFT_KEY = 'padalaSignupDraft_customer';
+const DRAFT_FIELD_IDS = ['name', 'phone', 'email'];
+
+function saveDraft(){
+  const draft = {};
+  DRAFT_FIELD_IDS.forEach(id=>{ draft[id] = document.getElementById(id).value; });
+  draft.agreeTerms = agreeTermsCheckbox.checked;
+  try{ sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch(e){ /* storage unavailable — draft just won't persist */ }
+}
+
+function restoreDraft(){
+  let draft;
+  try{
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if(!raw) return;
+    draft = JSON.parse(raw);
+  } catch(e){ return; }
+
+  DRAFT_FIELD_IDS.forEach(id=>{
+    if(draft[id]) document.getElementById(id).value = draft[id];
+  });
+  if(draft.agreeTerms){
+    agreeTermsCheckbox.checked = true;
+    signUpBtn.disabled = false;
+  }
+}
+
+function clearDraft(){
+  try{ sessionStorage.removeItem(DRAFT_KEY); } catch(e){}
+}
+
+restoreDraft();
+DRAFT_FIELD_IDS.forEach(id=>{
+  document.getElementById(id).addEventListener('input', saveDraft);
 });
 
 form.addEventListener('submit', async (e)=>{
@@ -117,6 +167,7 @@ form.addEventListener('submit', async (e)=>{
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     await cred.user.sendEmailVerification().catch(()=>{});
+    clearDraft();
     window.location.href = "verify-email.html";
   } catch(err){
     errorBanner.textContent = friendlyError(err.code);
